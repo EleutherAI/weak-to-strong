@@ -47,7 +47,8 @@ QWEN_KWARGS = {
     "fp32": not torch.cuda.is_bf16_supported(),
     "revision": "5fde88dff770a7d036847211f5d9d9705f0caa69",
 }
-DEFAULT_DEFAULT_LR = 1e-3
+DEFAULT_DEFAULT_LR = 1e-5
+OPT_DEFAULT_LR = 1e-3
 SMALL_BATCH_SIZE = 2
 LARGE_BATCH_SIZE = 32
 
@@ -68,13 +69,13 @@ MODEL_CONFIGS = [
     ),
     ModelConfig(
         name="gpt2-large",
-        default_lr=1e-5,
+        default_lr=DEFAULT_DEFAULT_LR,
         eval_batch_size=LARGE_BATCH_SIZE,
         lora_modules=GPT2_LORA_MODULES,
     ),
     ModelConfig(
         name="gpt2-xl",
-        default_lr=1e-5,
+        default_lr=DEFAULT_DEFAULT_LR,
         eval_batch_size=SMALL_BATCH_SIZE,
         gradient_checkpointing=True,
         lora_modules=GPT2_LORA_MODULES,
@@ -85,7 +86,7 @@ MODEL_CONFIGS = [
     ),
     ModelConfig(
         name="EleutherAI/pythia-14m",
-        default_lr=1e-5,
+        default_lr=DEFAULT_DEFAULT_LR,
         eval_batch_size=LARGE_BATCH_SIZE,
         minibatch_size_per_device=LARGE_BATCH_SIZE,
         model_parallel=False,
@@ -93,15 +94,15 @@ MODEL_CONFIGS = [
     ),
     ModelConfig(
         name="EleutherAI/pythia-70m",
-        default_lr=1e-5,
+        default_lr=DEFAULT_DEFAULT_LR,
         eval_batch_size=LARGE_BATCH_SIZE,
         minibatch_size_per_device=LARGE_BATCH_SIZE,
         model_parallel=False,
         lora_modules=GPT_NEOX_LORA_MODULES,
     ),
     ModelConfig(
-        name="EleutherAI/pythia-160m-v0",
-        default_lr=1e-5,
+        name="EleutherAI/pythia-160m",
+        default_lr=DEFAULT_DEFAULT_LR,
         eval_batch_size=LARGE_BATCH_SIZE,
         minibatch_size_per_device=LARGE_BATCH_SIZE,
         model_parallel=False,
@@ -109,7 +110,7 @@ MODEL_CONFIGS = [
     ),
     ModelConfig(
         name="EleutherAI/pythia-410m",
-        default_lr=1e-5,
+        default_lr=DEFAULT_DEFAULT_LR,
         eval_batch_size=LARGE_BATCH_SIZE,
         minibatch_size_per_device=LARGE_BATCH_SIZE,
         model_parallel=False,
@@ -164,7 +165,7 @@ MODEL_CONFIGS = [
     ),
     ModelConfig(
         name="Qwen/Qwen-1_8B",
-        default_lr=1e-5,
+        default_lr=DEFAULT_DEFAULT_LR,
         eval_batch_size=SMALL_BATCH_SIZE,
         minibatch_size_per_device=SMALL_BATCH_SIZE,
         gradient_checkpointing=True,
@@ -173,7 +174,7 @@ MODEL_CONFIGS = [
     ),
     ModelConfig(
         name="Qwen/Qwen-7B",
-        default_lr=1e-5,
+        default_lr=DEFAULT_DEFAULT_LR,
         eval_batch_size=SMALL_BATCH_SIZE,
         minibatch_size_per_device=SMALL_BATCH_SIZE,
         gradient_checkpointing=True,
@@ -183,7 +184,7 @@ MODEL_CONFIGS = [
     ),
     ModelConfig(
         name="Qwen/Qwen-14B",
-        default_lr=1e-5,
+        default_lr=DEFAULT_DEFAULT_LR,
         eval_batch_size=SMALL_BATCH_SIZE,
         minibatch_size_per_device=SMALL_BATCH_SIZE,
         gradient_checkpointing=True,
@@ -193,7 +194,7 @@ MODEL_CONFIGS = [
     ),
     ModelConfig(
         name="Qwen/Qwen-72B",
-        default_lr=1e-5,
+        default_lr=DEFAULT_DEFAULT_LR,
         eval_batch_size=1,
         gradient_checkpointing=True,
         model_parallel=True,
@@ -205,7 +206,7 @@ MODEL_CONFIGS = [
     ),
     ModelConfig(
         name="facebook/opt-125m",
-        default_lr=DEFAULT_DEFAULT_LR,
+        default_lr=OPT_DEFAULT_LR,
         eval_batch_size=LARGE_BATCH_SIZE,
         minibatch_size_per_device=LARGE_BATCH_SIZE,
         model_parallel=False,
@@ -213,7 +214,7 @@ MODEL_CONFIGS = [
     ),
     ModelConfig(
         name="facebook/opt-350m",
-        default_lr=DEFAULT_DEFAULT_LR,
+        default_lr=OPT_DEFAULT_LR,
         eval_batch_size=LARGE_BATCH_SIZE,
         minibatch_size_per_device=LARGE_BATCH_SIZE,
         model_parallel=False,
@@ -221,7 +222,7 @@ MODEL_CONFIGS = [
     ),
     ModelConfig(
         name="facebook/opt-2.7b",
-        default_lr=DEFAULT_DEFAULT_LR,
+        default_lr=OPT_DEFAULT_LR,
         eval_batch_size=LARGE_BATCH_SIZE,
         minibatch_size_per_device=LARGE_BATCH_SIZE,
         model_parallel=False,
@@ -229,7 +230,7 @@ MODEL_CONFIGS = [
     ),
     ModelConfig(
         name="facebook/opt-6.7b",
-        default_lr=DEFAULT_DEFAULT_LR,
+        default_lr=OPT_DEFAULT_LR,
         eval_batch_size=SMALL_BATCH_SIZE,
         minibatch_size_per_device=SMALL_BATCH_SIZE,
         model_parallel=False,
@@ -239,7 +240,7 @@ MODEL_CONFIGS = [
     ),
     ModelConfig(
         name="facebook/opt-13b",
-        default_lr=DEFAULT_DEFAULT_LR,
+        default_lr=OPT_DEFAULT_LR,
         eval_batch_size=SMALL_BATCH_SIZE,
         minibatch_size_per_device=SMALL_BATCH_SIZE,
         model_parallel=True,
@@ -249,7 +250,7 @@ MODEL_CONFIGS = [
     ),
     ModelConfig(
         name="facebook/opt-30b",
-        default_lr=DEFAULT_DEFAULT_LR,
+        default_lr=OPT_DEFAULT_LR,
         eval_batch_size=SMALL_BATCH_SIZE,
         minibatch_size_per_device=SMALL_BATCH_SIZE,
         model_parallel=True,
