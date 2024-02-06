@@ -329,10 +329,12 @@ MODEL_CONFIGS = [
     ModelConfig(
         name="EleutherAI/gpt-j-6b",
         default_lr=DEFAULT_DEFAULT_LR,
-        eval_batch_size=LARGE_BATCH_SIZE,
-        minibatch_size_per_device=LARGE_BATCH_SIZE,
+        eval_batch_size=SMALL_BATCH_SIZE,
+        minibatch_size_per_device=SMALL_BATCH_SIZE,
         model_parallel=False,
         lora_modules=["q_proj", "k_proj", "v_proj", "fc_in", "fc_out"],
+        gradient_checkpointing=True,
+        custom_kwargs=BFLOAT_KWARGS,
     ),
     ModelConfig(
         name="EleutherAI/gpt-neox-20b",
