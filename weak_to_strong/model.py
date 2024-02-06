@@ -54,7 +54,16 @@ class TransformerWithHead(PreTrainedModel):
             self.score = None
         else:
             hidden_size = getattr(
-                config, "n_embd", getattr(config, "hidden_size", None)
+                config,
+                "word_embed_proj_dim",
+                getattr(
+                    config,
+                    "n_embd",
+                    getattr(
+                        config,
+                        "hidden_size",
+                        None)
+                )
             )
             assert isinstance(hidden_size, int)
             self.score = torch.nn.Linear(hidden_size, self.num_labels, bias=False).to(
