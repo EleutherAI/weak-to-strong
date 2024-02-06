@@ -47,31 +47,34 @@ QWEN_KWARGS = {
     "fp32": not torch.cuda.is_bf16_supported(),
     "revision": "5fde88dff770a7d036847211f5d9d9705f0caa69",
 }
+DEFAULT_DEFAULT_LR = 1e-3
+SMALL_BATCH_SIZE = 2
+LARGE_BATCH_SIZE = 32
 
 # NOTE learning rates are not particularly tuned, work somewhat reasonably at train batch size 32
 MODEL_CONFIGS = [
     ModelConfig(
         name="gpt2",
         default_lr=5e-5,
-        eval_batch_size=32,
+        eval_batch_size=LARGE_BATCH_SIZE,
         lora_modules=GPT2_LORA_MODULES,
     ),
     ModelConfig(
         name="gpt2-medium",
         default_lr=5e-5,
-        eval_batch_size=32,
+        eval_batch_size=LARGE_BATCH_SIZE,
         lora_modules=GPT2_LORA_MODULES,
     ),
     ModelConfig(
         name="gpt2-large",
         default_lr=1e-5,
-        eval_batch_size=32,
+        eval_batch_size=LARGE_BATCH_SIZE,
         lora_modules=GPT2_LORA_MODULES,
     ),
     ModelConfig(
         name="gpt2-xl",
         default_lr=1e-5,
-        eval_batch_size=2,
+        eval_batch_size=SMALL_BATCH_SIZE,
         gradient_checkpointing=True,
         lora_modules=GPT2_LORA_MODULES,
         # Should use model_parallel on V100s (note: ironically if you have a single V100
@@ -80,67 +83,76 @@ MODEL_CONFIGS = [
         model_parallel=(per_device_ram < 35e9 and torch.cuda.device_count() > 1),
     ),
     ModelConfig(
-        name="EleutherAI/pythia-70m",
+        name="EleutherAI/pythia-14m",
         default_lr=1e-5,
-        eval_batch_size=32,
-        minibatch_size_per_device=32,  # this needs adjusting for GPU/dataset
+        eval_batch_size=LARGE_BATCH_SIZE,
+        minibatch_size_per_device=LARGE_BATCH_SIZE,  # this needs adjusting for GPU/dataset
         model_parallel=False,
         lora_modules=GPT_NEOX_LORA_MODULES,
     ),
     ModelConfig(
-        name="EleutherAI/pythia-14m",
+        name="EleutherAI/pythia-70m",
         default_lr=1e-5,
-        eval_batch_size=32,
-        minibatch_size_per_device=32,  # this needs adjusting for GPU/dataset
+        eval_batch_size=LARGE_BATCH_SIZE,
+        minibatch_size_per_device=LARGE_BATCH_SIZE,  # this needs adjusting for GPU/dataset
         model_parallel=False,
         lora_modules=GPT_NEOX_LORA_MODULES,
     ),
     ModelConfig(
         name="EleutherAI/pythia-160m-v0",
         default_lr=1e-5,
-        eval_batch_size=32,
-        minibatch_size_per_device=32,  # this needs adjusting for GPU/dataset
+        eval_batch_size=LARGE_BATCH_SIZE,
+        minibatch_size_per_device=LARGE_BATCH_SIZE,  # this needs adjusting for GPU/dataset
         model_parallel=False,
         lora_modules=GPT_NEOX_LORA_MODULES,
     ),
     ModelConfig(
         name="EleutherAI/pythia-410m",
         default_lr=1e-5,
-        eval_batch_size=32,
-        minibatch_size_per_device=32,  # this needs adjusting for GPU/dataset
+        eval_batch_size=LARGE_BATCH_SIZE,
+        minibatch_size_per_device=LARGE_BATCH_SIZE,  # this needs adjusting for GPU/dataset
         model_parallel=False,
         lora_modules=GPT_NEOX_LORA_MODULES,
     ),
     ModelConfig(
         name="EleutherAI/pythia-2.8b",
-        default_lr=1e-5,
-        eval_batch_size=32,
-        minibatch_size_per_device=2,  # this needs adjusting for GPU/dataset
+        default_lr=DEFAULT_DEFAULT_LR,
+        eval_batch_size=LARGE_BATCH_SIZE,
+        minibatch_size_per_device=LARGE_BATCH_SIZE,  # this needs adjusting for GPU/dataset
         model_parallel=False,
         lora_modules=GPT_NEOX_LORA_MODULES,
     ),
     ModelConfig(
+        name="EleutherAI/pythia-6.9b",
+        default_lr=DEFAULT_DEFAULT_LR,
+        eval_batch_size=SMALL_BATCH_SIZE,
+        minibatch_size_per_device=SMALL_BATCH_SIZE,  # this needs adjusting for GPU/dataset
+        model_parallel=False,
+        lora_modules=GPT_NEOX_LORA_MODULES,
+        custom_kwargs=BFLOAT_KWARGS,
+    ),
+    ModelConfig(
         name="EleutherAI/pythia-12b",
-        default_lr=1e-5,
-        eval_batch_size=32,
-        minibatch_size_per_device=2,  # this needs adjusting for GPU/dataset
+        default_lr=DEFAULT_DEFAULT_LR,
+        eval_batch_size=SMALL_BATCH_SIZE,
+        minibatch_size_per_device=SMALL_BATCH_SIZE,  # this needs adjusting for GPU/dataset
         model_parallel=False,
         lora_modules=GPT_NEOX_LORA_MODULES,
         custom_kwargs=BFLOAT_KWARGS,
     ),
     ModelConfig(
         name="mistralai/Mistral-7B-v0.1",
-        default_lr=1e-5,
-        eval_batch_size=2,
+        default_lr=DEFAULT_DEFAULT_LR,
+        eval_batch_size=SMALL_BATCH_SIZE,
         lora_modules=MISTRAL_LORA_MODULES,
-        minibatch_size_per_device=1,  # this needs adjusting for GPU/dataset
+        minibatch_size_per_device=SMALL_BATCH_SIZE,  # this needs adjusting for GPU/dataset
         gradient_checkpointing=True,
         model_parallel=False,
         custom_kwargs=BFLOAT_KWARGS,
     ),
     ModelConfig(
         name="mistralai/Mixtral-8x7B-v0.1",
-        default_lr=1e-5,
+        default_lr=DEFAULT_DEFAULT_LR,
         eval_batch_size=1,
         minibatch_size_per_device=1,  # this needs adjusting for GPU/dataset
         lora_modules=MISTRAL_LORA_MODULES,
@@ -152,7 +164,8 @@ MODEL_CONFIGS = [
     ModelConfig(
         name="Qwen/Qwen-1_8B",
         default_lr=1e-5,
-        eval_batch_size=2,
+        eval_batch_size=SMALL_BATCH_SIZE,
+        minibatch_size_per_device=SMALL_BATCH_SIZE,  # this needs adjusting for GPU/dataset
         gradient_checkpointing=True,
         model_parallel=(per_device_ram < 35e9 and torch.cuda.device_count() > 1),
         custom_kwargs=QWEN_KWARGS,
@@ -160,7 +173,8 @@ MODEL_CONFIGS = [
     ModelConfig(
         name="Qwen/Qwen-7B",
         default_lr=1e-5,
-        eval_batch_size=2,
+        eval_batch_size=SMALL_BATCH_SIZE,
+        minibatch_size_per_device=SMALL_BATCH_SIZE,  # this needs adjusting for GPU/dataset
         gradient_checkpointing=True,
         model_parallel=True,
         # note: you will probably not be able to run this without many gpus
@@ -169,7 +183,8 @@ MODEL_CONFIGS = [
     ModelConfig(
         name="Qwen/Qwen-14B",
         default_lr=1e-5,
-        eval_batch_size=2,
+        eval_batch_size=SMALL_BATCH_SIZE,
+        minibatch_size_per_device=SMALL_BATCH_SIZE,  # this needs adjusting for GPU/dataset
         gradient_checkpointing=True,
         model_parallel=True,
         # note: probably need bf16 support and many gpus
@@ -188,18 +203,26 @@ MODEL_CONFIGS = [
         default_optimizer="adafactor",
     ),
     ModelConfig(
+        name="facebook/opt-350m",
+        default_lr=DEFAULT_DEFAULT_LR,
+        eval_batch_size=LARGE_BATCH_SIZE,
+        minibatch_size_per_device=LARGE_BATCH_SIZE,  # this needs adjusting for GPU/dataset
+        model_parallel=False,
+        lora_modules=OPT_LORA_MODULES,
+    ),
+    ModelConfig(
         name="facebook/opt-2.7b",
-        default_lr=1e-3,
-        eval_batch_size=32,
-        minibatch_size_per_device=2,  # this needs adjusting for GPU/dataset
+        default_lr=DEFAULT_DEFAULT_LR,
+        eval_batch_size=LARGE_BATCH_SIZE,
+        minibatch_size_per_device=LARGE_BATCH_SIZE,  # this needs adjusting for GPU/dataset
         model_parallel=False,
         lora_modules=OPT_LORA_MODULES,
     ),
     ModelConfig(
         name="facebook/opt-6.7b",
-        default_lr=1e-3,
-        eval_batch_size=2,
-        minibatch_size_per_device=2,  # this needs adjusting for GPU/dataset
+        default_lr=DEFAULT_DEFAULT_LR,
+        eval_batch_size=SMALL_BATCH_SIZE,
+        minibatch_size_per_device=SMALL_BATCH_SIZE,  # this needs adjusting for GPU/dataset
         model_parallel=False,
         lora_modules=OPT_LORA_MODULES,
         gradient_checkpointing=True,
@@ -207,9 +230,9 @@ MODEL_CONFIGS = [
     ),
     ModelConfig(
         name="facebook/opt-13b",
-        default_lr=1e-3,
-        eval_batch_size=2,
-        minibatch_size_per_device=2,  # this needs adjusting for GPU/dataset
+        default_lr=DEFAULT_DEFAULT_LR,
+        eval_batch_size=SMALL_BATCH_SIZE,
+        minibatch_size_per_device=SMALL_BATCH_SIZE,  # this needs adjusting for GPU/dataset
         model_parallel=True,
         lora_modules=OPT_LORA_MODULES,
         gradient_checkpointing=True,
@@ -217,9 +240,9 @@ MODEL_CONFIGS = [
     ),
     ModelConfig(
         name="facebook/opt-30b",
-        default_lr=1e-3,
-        eval_batch_size=2,
-        minibatch_size_per_device=2,  # this needs adjusting for GPU/dataset
+        default_lr=DEFAULT_DEFAULT_LR,
+        eval_batch_size=SMALL_BATCH_SIZE,
+        minibatch_size_per_device=SMALL_BATCH_SIZE,  # this needs adjusting for GPU/dataset
         model_parallel=True,
         lora_modules=OPT_LORA_MODULES,
         gradient_checkpointing=True,
@@ -227,25 +250,25 @@ MODEL_CONFIGS = [
     ),
     ModelConfig(
         name="bigscience/bloom-560m",
-        default_lr=1e-3,
-        eval_batch_size=32,
-        minibatch_size_per_device=32,  # this needs adjusting for GPU/dataset
+        default_lr=DEFAULT_DEFAULT_LR,
+        eval_batch_size=LARGE_BATCH_SIZE,
+        minibatch_size_per_device=LARGE_BATCH_SIZE,  # this needs adjusting for GPU/dataset
         model_parallel=False,
         lora_modules=GPT_NEOX_LORA_MODULES,
     ),
     ModelConfig(
         name="bigscience/bloom-3b",
-        default_lr=1e-3,
-        eval_batch_size=32,
-        minibatch_size_per_device=32,  # this needs adjusting for GPU/dataset
+        default_lr=DEFAULT_DEFAULT_LR,
+        eval_batch_size=LARGE_BATCH_SIZE,
+        minibatch_size_per_device=LARGE_BATCH_SIZE,  # this needs adjusting for GPU/dataset
         model_parallel=False,
         lora_modules=GPT_NEOX_LORA_MODULES,
     ),
     ModelConfig(
         name="bigscience/bloom-7b1",
-        default_lr=1e-3,
-        eval_batch_size=2,
-        minibatch_size_per_device=2,  # this needs adjusting for GPU/dataset
+        default_lr=DEFAULT_DEFAULT_LR,
+        eval_batch_size=SMALL_BATCH_SIZE,
+        minibatch_size_per_device=SMALL_BATCH_SIZE,  # this needs adjusting for GPU/dataset
         model_parallel=False,
         lora_modules=GPT_NEOX_LORA_MODULES,
         gradient_checkpointing=True,
@@ -253,7 +276,7 @@ MODEL_CONFIGS = [
     ),
     ModelConfig(
         name="bigscience/bloom",  # 176B parameters
-        default_lr=1e-3,
+        default_lr=DEFAULT_DEFAULT_LR,
         eval_batch_size=1,
         minibatch_size_per_device=1,  # this needs adjusting for GPU/dataset
         model_parallel=True,
@@ -264,17 +287,17 @@ MODEL_CONFIGS = [
     ),
     ModelConfig(
         name="stabilityai/stablelm-base-alpha-3b",
-        default_lr=1e-3,
-        eval_batch_size=32,
-        minibatch_size_per_device=32,  # this needs adjusting for GPU/dataset
+        default_lr=DEFAULT_DEFAULT_LR,
+        eval_batch_size=LARGE_BATCH_SIZE,
+        minibatch_size_per_device=LARGE_BATCH_SIZE,  # this needs adjusting for GPU/dataset
         model_parallel=False,
         lora_modules=GPT_NEOX_LORA_MODULES,
     ),
     ModelConfig(
         name="stabilityai/stablelm-base-alpha-7b",
-        default_lr=1e-3,
-        eval_batch_size=2,
-        minibatch_size_per_device=2,  # this needs adjusting for GPU/dataset
+        default_lr=DEFAULT_DEFAULT_LR,
+        eval_batch_size=SMALL_BATCH_SIZE,
+        minibatch_size_per_device=SMALL_BATCH_SIZE,  # this needs adjusting for GPU/dataset
         model_parallel=False,
         lora_modules=GPT_NEOX_LORA_MODULES,
         gradient_checkpointing=True,
@@ -286,25 +309,25 @@ MODEL_CONFIGS = [
     ),
     ModelConfig(
         name="EleutherAI/gpt-neo-2.7B",
-        default_lr=1e-3,
-        eval_batch_size=32,
-        minibatch_size_per_device=32,  # this needs adjusting for GPU/dataset
+        default_lr=DEFAULT_DEFAULT_LR,
+        eval_batch_size=LARGE_BATCH_SIZE,
+        minibatch_size_per_device=LARGE_BATCH_SIZE,  # this needs adjusting for GPU/dataset
         model_parallel=False,
         lora_modules=GPT_NEOX_LORA_MODULES,
     ),
     ModelConfig(
         name="EleutherAI/gpt-j-6b",
-        default_lr=1e-3,
-        eval_batch_size=32,
-        minibatch_size_per_device=32,  # this needs adjusting for GPU/dataset
+        default_lr=DEFAULT_DEFAULT_LR,
+        eval_batch_size=LARGE_BATCH_SIZE,
+        minibatch_size_per_device=LARGE_BATCH_SIZE,  # this needs adjusting for GPU/dataset
         model_parallel=False,
         lora_modules=GPT_NEOX_LORA_MODULES,
     ),
     ModelConfig(
         name="EleutherAI/gpt-neox-20b",
-        default_lr=1e-3,
-        eval_batch_size=2,
-        minibatch_size_per_device=2,  # this needs adjusting for GPU/dataset
+        default_lr=DEFAULT_DEFAULT_LR,
+        eval_batch_size=SMALL_BATCH_SIZE,
+        minibatch_size_per_device=SMALL_BATCH_SIZE,  # this needs adjusting for GPU/dataset
         model_parallel=True,
         lora_modules=GPT_NEOX_LORA_MODULES,
         gradient_checkpointing=True,
