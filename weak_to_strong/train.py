@@ -53,7 +53,12 @@ def train_model(
     - soft_label: a list of soft label probabilities
     """
 
-    print("LR", lr, "batch_size", batch_size, "minibatch_size", minibatch_size)
+    print(
+        "LR", lr, 
+        "batch_size", batch_size, 
+        "minibatch_size", minibatch_size, 
+        "dataset", len(ds)
+    )
     assert (
         batch_size % minibatch_size == 0
     ), "batch size must be divisible by minibatch size"
