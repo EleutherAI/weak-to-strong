@@ -324,7 +324,7 @@ MODEL_CONFIGS = [
         eval_batch_size=LARGE_BATCH_SIZE,
         minibatch_size_per_device=LARGE_BATCH_SIZE,
         model_parallel=False,
-        lora_modules=GPT_NEOX_LORA_MODULES,
+        lora_modules=["q_proj", "k_proj", "v_proj", "c_fc", "c_proj"],
     ),
     ModelConfig(
         name="EleutherAI/gpt-j-6b",
@@ -332,7 +332,7 @@ MODEL_CONFIGS = [
         eval_batch_size=LARGE_BATCH_SIZE,
         minibatch_size_per_device=LARGE_BATCH_SIZE,
         model_parallel=False,
-        lora_modules=GPT_NEOX_LORA_MODULES,
+        lora_modules=["q_proj", "k_proj", "v_proj", "fc_in", "fc_out"],
     ),
     ModelConfig(
         name="EleutherAI/gpt-neox-20b",

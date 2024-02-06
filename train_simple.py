@@ -51,6 +51,7 @@ def main(
     # still do final evals (which requires eval_every to be set to a non-zero, non-None value)
     strong_eval_every: int = 10000000,
     sync_command: Optional[str] = None,
+    skip_if_exists: bool = False,
 ):  
     assert (
         ds_name in VALID_DATASETS
@@ -180,6 +181,9 @@ def main(
         sweep_subfolder=sweep_subfolder,
         config_name=config_name,
     )
+    if os.path.exists(save_path) and skip_if_exists:
+        print(f"Skipping {save_path} because it already exists")
+        return
     wandb.init(
         project="weak-to-strong",
         config=config,
