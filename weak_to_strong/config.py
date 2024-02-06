@@ -272,6 +272,8 @@ MODEL_CONFIGS = [
         minibatch_size_per_device=LARGE_BATCH_SIZE,
         model_parallel=False,
         lora_modules=GPT_NEOX_LORA_MODULES,
+        gradient_checkpointing=True,
+        custom_kwargs=BFLOAT_KWARGS,
     ),
     ModelConfig(
         name="bigscience/bloom-7b1",
