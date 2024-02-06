@@ -20,7 +20,15 @@ class ModelConfig:
 
 GPT_NEOX_LORA_MODULES = ["dense_h_to_4h", "dense_4h_to_h", "query_key_value"]
 GPT2_LORA_MODULES = ["c_fc", "c_proj", "c_attn"]
-OPT_MODULES = [
+MISTRAL_LORA_MODULES = [
+    "up_proj",
+    "down_proj",
+    "gate_proj",
+    "k_proj",
+    "q_proj",
+    "v_proj",
+]
+OPT_LORA_MODULES = [
     "fc1",
     "fc2",
     "k_proj",
@@ -28,6 +36,17 @@ OPT_MODULES = [
     "v_proj",
 ]
 per_device_ram = torch.cuda.get_device_properties(0).total_memory
+BFLOAT_KWARGS = {
+    "torch_dtype": torch.bfloat16
+    if torch.cuda.is_bf16_supported()
+    else torch.float32  # okay because we're using LoRA
+}
+QWEN_KWARGS = {
+    "trust_remote_code": True,
+    "bf16": torch.cuda.is_bf16_supported(),
+    "fp32": not torch.cuda.is_bf16_supported(),
+    "revision": "5fde88dff770a7d036847211f5d9d9705f0caa69",
+}
 
 # NOTE learning rates are not particularly tuned, work somewhat reasonably at train batch size 32
 MODEL_CONFIGS = [
@@ -107,32 +126,28 @@ MODEL_CONFIGS = [
         minibatch_size_per_device=2,  # this needs adjusting for GPU/dataset
         model_parallel=False,
         lora_modules=GPT_NEOX_LORA_MODULES,
-        custom_kwargs={
-            "torch_dtype": torch.bfloat16
-            if torch.cuda.is_bf16_supported()
-            else torch.float32  # we can only do this because we're using LoRA
-        },
+        custom_kwargs=BFLOAT_KWARGS,
     ),
     ModelConfig(
         name="mistralai/Mistral-7B-v0.1",
         default_lr=1e-5,
         eval_batch_size=2,
-        lora_modules=[
-            "up_proj",
-            "down_proj",
-            "gate_proj",
-            "k_proj",
-            "q_proj",
-            "v_proj",
-        ],
+        lora_modules=MISTRAL_LORA_MODULES,
         minibatch_size_per_device=1,  # this needs adjusting for GPU/dataset
         gradient_checkpointing=True,
         model_parallel=False,
-        custom_kwargs={
-            "torch_dtype": torch.bfloat16  # we can only do this because we're using LoRA
-            if torch.cuda.is_bf16_supported()
-            else torch.float32,
-        },
+        custom_kwargs=BFLOAT_KWARGS,
+    ),
+    ModelConfig(
+        name="mistralai/Mixtral-8x7B-v0.1",
+        default_lr=1e-5,
+        eval_batch_size=1,
+        minibatch_size_per_device=1,  # this needs adjusting for GPU/dataset
+        lora_modules=MISTRAL_LORA_MODULES,
+        gradient_checkpointing=True,
+        model_parallel=True,
+        custom_kwargs=BFLOAT_KWARGS,
+        default_optimizer="adafactor",
     ),
     ModelConfig(
         name="Qwen/Qwen-1_8B",
@@ -140,12 +155,7 @@ MODEL_CONFIGS = [
         eval_batch_size=2,
         gradient_checkpointing=True,
         model_parallel=(per_device_ram < 35e9 and torch.cuda.device_count() > 1),
-        custom_kwargs={
-            "trust_remote_code": True,
-            "bf16": torch.cuda.is_bf16_supported(),
-            "fp32": not torch.cuda.is_bf16_supported(),
-            "revision": "5fde88dff770a7d036847211f5d9d9705f0caa69",
-        },
+        custom_kwargs=QWEN_KWARGS,
     ),
     ModelConfig(
         name="Qwen/Qwen-7B",
@@ -154,12 +164,7 @@ MODEL_CONFIGS = [
         gradient_checkpointing=True,
         model_parallel=True,
         # note: you will probably not be able to run this without many gpus
-        custom_kwargs={
-            "trust_remote_code": True,
-            "bf16": torch.cuda.is_bf16_supported(),
-            "fp32": not torch.cuda.is_bf16_supported(),
-            "revision": "d4efd21e866b9cb3466cb65b963933f5e98016d1",
-        },
+        custom_kwargs=QWEN_KWARGS,
     ),
     ModelConfig(
         name="Qwen/Qwen-14B",
@@ -167,13 +172,8 @@ MODEL_CONFIGS = [
         eval_batch_size=2,
         gradient_checkpointing=True,
         model_parallel=True,
-        # note: you will probably not be able to run this bf16 support and without many gpus
-        custom_kwargs={
-            "trust_remote_code": True,
-            "bf16": torch.cuda.is_bf16_supported(),
-            "fp32": not torch.cuda.is_bf16_supported(),
-            "revision": "8be2854218fea9054331e217fd26a06f3fd02004",
-        },
+        # note: probably need bf16 support and many gpus
+        custom_kwargs=QWEN_KWARGS,
     ),
     ModelConfig(
         name="Qwen/Qwen-72B",
@@ -181,64 +181,134 @@ MODEL_CONFIGS = [
         eval_batch_size=1,
         gradient_checkpointing=True,
         model_parallel=True,
-        # note: you will probably not be able to run this without bf16 support and many gpus
-        custom_kwargs={
-            "trust_remote_code": True,
-            "bf16": torch.cuda.is_bf16_supported(),
-            "fp32": not torch.cuda.is_bf16_supported(),
-            "revision": "fec78c0e3b3b10dd9f0ce775c34a686a3255a7d1",
-        },
+        # note: probably need bf16 support and many gpus
+        custom_kwargs=QWEN_KWARGS,
         # This model is really big, save space by using adafactor.
         # Note that even then it will take up ~60GB per GPU on an 8-GPU machine.
         default_optimizer="adafactor",
     ),
     ModelConfig(
         name="facebook/opt-2.7b",
-        default_lr=1e-5,
+        default_lr=1e-3,
         eval_batch_size=32,
         minibatch_size_per_device=2,  # this needs adjusting for GPU/dataset
         model_parallel=False,
-        lora_modules=OPT_MODULES,
+        lora_modules=OPT_LORA_MODULES,
     ),
     ModelConfig(
         name="facebook/opt-6.7b",
-        default_lr=1e-5,
+        default_lr=1e-3,
         eval_batch_size=2,
         minibatch_size_per_device=2,  # this needs adjusting for GPU/dataset
         model_parallel=False,
-        lora_modules=OPT_MODULES,
+        lora_modules=OPT_LORA_MODULES,
         gradient_checkpointing=True,
-        custom_kwargs={
-            "torch_dtype": torch.bfloat16  # we can only do this because we're using LoRA
-            if torch.cuda.is_bf16_supported()
-            else torch.float32,
-        },
+        custom_kwargs=BFLOAT_KWARGS,
     ),
     ModelConfig(
         name="facebook/opt-13b",
-        default_lr=1e-5,
-        eval_batch_size=32,
+        default_lr=1e-3,
+        eval_batch_size=2,
         minibatch_size_per_device=2,  # this needs adjusting for GPU/dataset
         model_parallel=True,
-        lora_modules=OPT_MODULES,
+        lora_modules=OPT_LORA_MODULES,
+        gradient_checkpointing=True,
+        custom_kwargs=BFLOAT_KWARGS,
+    ),
+    ModelConfig(
+        name="facebook/opt-30b",
+        default_lr=1e-3,
+        eval_batch_size=2,
+        minibatch_size_per_device=2,  # this needs adjusting for GPU/dataset
+        model_parallel=True,
+        lora_modules=OPT_LORA_MODULES,
+        gradient_checkpointing=True,
+        custom_kwargs=BFLOAT_KWARGS,
+    ),
+    ModelConfig(
+        name="bigscience/bloom-560m",
+        default_lr=1e-3,
+        eval_batch_size=32,
+        minibatch_size_per_device=32,  # this needs adjusting for GPU/dataset
+        model_parallel=False,
+        lora_modules=GPT_NEOX_LORA_MODULES,
+    ),
+    ModelConfig(
+        name="bigscience/bloom-3b",
+        default_lr=1e-3,
+        eval_batch_size=32,
+        minibatch_size_per_device=32,  # this needs adjusting for GPU/dataset
+        model_parallel=False,
+        lora_modules=GPT_NEOX_LORA_MODULES,
+    ),
+    ModelConfig(
+        name="bigscience/bloom-7b1",
+        default_lr=1e-3,
+        eval_batch_size=2,
+        minibatch_size_per_device=2,  # this needs adjusting for GPU/dataset
+        model_parallel=False,
+        lora_modules=GPT_NEOX_LORA_MODULES,
+        gradient_checkpointing=True,
+        custom_kwargs=BFLOAT_KWARGS,
+    ),
+    ModelConfig(
+        name="bigscience/bloom",  # 176B parameters
+        default_lr=1e-3,
+        eval_batch_size=1,
+        minibatch_size_per_device=1,  # this needs adjusting for GPU/dataset
+        model_parallel=True,
+        lora_modules=GPT_NEOX_LORA_MODULES,
+        gradient_checkpointing=True,
+        custom_kwargs=BFLOAT_KWARGS,
+        default_optimizer="adafactor",
+    ),
+    ModelConfig(
+        name="stabilityai/stablelm-base-alpha-3b",
+        default_lr=1e-3,
+        eval_batch_size=32,
+        minibatch_size_per_device=32,  # this needs adjusting for GPU/dataset
+        model_parallel=False,
+        lora_modules=GPT_NEOX_LORA_MODULES,
+    ),
+    ModelConfig(
+        name="stabilityai/stablelm-base-alpha-7b",
+        default_lr=1e-3,
+        eval_batch_size=2,
+        minibatch_size_per_device=2,  # this needs adjusting for GPU/dataset
+        model_parallel=False,
+        lora_modules=GPT_NEOX_LORA_MODULES,
+        gradient_checkpointing=True,
         custom_kwargs={
-            "torch_dtype": torch.bfloat16  # we can only do this because we're using LoRA
+            "torch_dtype": torch.bfloat16  # okay because we're using LoRA
             if torch.cuda.is_bf16_supported()
             else torch.float32,
         },
     ),
     ModelConfig(
-        name="facebook/opt-30b",
-        default_lr=1e-5,
+        name="EleutherAI/gpt-neo-2.7B",
+        default_lr=1e-3,
         eval_batch_size=32,
+        minibatch_size_per_device=32,  # this needs adjusting for GPU/dataset
+        model_parallel=False,
+        lora_modules=GPT_NEOX_LORA_MODULES,
+    ),
+    ModelConfig(
+        name="EleutherAI/gpt-j-6b",
+        default_lr=1e-3,
+        eval_batch_size=32,
+        minibatch_size_per_device=32,  # this needs adjusting for GPU/dataset
+        model_parallel=False,
+        lora_modules=GPT_NEOX_LORA_MODULES,
+    ),
+    ModelConfig(
+        name="EleutherAI/gpt-neox-20b",
+        default_lr=1e-3,
+        eval_batch_size=2,
         minibatch_size_per_device=2,  # this needs adjusting for GPU/dataset
         model_parallel=True,
-        lora_modules=OPT_MODULES,
-        custom_kwargs={
-            "torch_dtype": torch.bfloat16  # we can only do this because we're using LoRA
-            if torch.cuda.is_bf16_supported()
-            else torch.float32,
-        },
+        lora_modules=GPT_NEOX_LORA_MODULES,
+        gradient_checkpointing=True,
+        custom_kwargs=BFLOAT_KWARGS,
     ),
 ]
 MODELS_DICT: dict[str, ModelConfig] = {
