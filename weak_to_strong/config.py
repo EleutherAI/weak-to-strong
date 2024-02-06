@@ -20,6 +20,13 @@ class ModelConfig:
 
 GPT_NEOX_LORA_MODULES = ["dense_h_to_4h", "dense_4h_to_h", "query_key_value"]
 GPT2_LORA_MODULES = ["c_fc", "c_proj", "c_attn"]
+OPT_MODULES = [
+    "fc1",
+    "fc2",
+    "k_proj",
+    "q_proj",
+    "v_proj",
+]
 per_device_ram = torch.cuda.get_device_properties(0).total_memory
 
 # NOTE learning rates are not particularly tuned, work somewhat reasonably at train batch size 32
@@ -184,6 +191,54 @@ MODEL_CONFIGS = [
         # This model is really big, save space by using adafactor.
         # Note that even then it will take up ~60GB per GPU on an 8-GPU machine.
         default_optimizer="adafactor",
+    ),
+    ModelConfig(
+        name="facebook/opt-2.7b",
+        default_lr=1e-5,
+        eval_batch_size=32,
+        minibatch_size_per_device=2,  # this needs adjusting for GPU/dataset
+        model_parallel=False,
+        lora_modules=OPT_MODULES,
+    ),
+    ModelConfig(
+        name="facebook/opt-6.7b",
+        default_lr=1e-5,
+        eval_batch_size=2,
+        minibatch_size_per_device=2,  # this needs adjusting for GPU/dataset
+        model_parallel=False,
+        lora_modules=OPT_MODULES,
+        gradient_checkpointing=True,
+        custom_kwargs={
+            "torch_dtype": torch.bfloat16  # we can only do this because we're using LoRA
+            if torch.cuda.is_bf16_supported()
+            else torch.float32,
+        },
+    ),
+    ModelConfig(
+        name="facebook/opt-13b",
+        default_lr=1e-5,
+        eval_batch_size=32,
+        minibatch_size_per_device=2,  # this needs adjusting for GPU/dataset
+        model_parallel=True,
+        lora_modules=OPT_MODULES,
+        custom_kwargs={
+            "torch_dtype": torch.bfloat16  # we can only do this because we're using LoRA
+            if torch.cuda.is_bf16_supported()
+            else torch.float32,
+        },
+    ),
+    ModelConfig(
+        name="facebook/opt-30b",
+        default_lr=1e-5,
+        eval_batch_size=32,
+        minibatch_size_per_device=2,  # this needs adjusting for GPU/dataset
+        model_parallel=True,
+        lora_modules=OPT_MODULES,
+        custom_kwargs={
+            "torch_dtype": torch.bfloat16  # we can only do this because we're using LoRA
+            if torch.cuda.is_bf16_supported()
+            else torch.float32,
+        },
     ),
 ]
 MODELS_DICT: dict[str, ModelConfig] = {
