@@ -45,6 +45,7 @@ def main(
         assert weak_model_sizes is not None and strong_model_sizes is not None
         weak_model_sizes = split_model_sizes(weak_model_sizes)
         strong_model_sizes = split_model_sizes(strong_model_sizes)
+        all_model_sizes = weak_model_sizes + strong_model_sizes
         weak_to_strong_model_sizes = [
             (weak, strong)
             for weak in weak_model_sizes
@@ -52,10 +53,7 @@ def main(
         ]
     else:
         assert weak_model_sizes is None and strong_model_sizes is None
-        model_sizes = split_model_sizes(model_sizes)
-        weak_model_sizes = (
-            model_sizes if train_self_to_self else model_sizes[:-1]
-        )
+        all_model_sizes = model_sizes = split_model_sizes(model_sizes)
         weak_to_strong_model_sizes = [
             (model_sizes[i], model_sizes[j])
             for i in range(len(model_sizes))
@@ -66,7 +64,7 @@ def main(
         ]
 
     print("Running ground truth models")
-    for model_size in weak_model_sizes:
+    for model_size in all_model_sizes:
         print(f"Running ground truth {model_size}")
         train_simple_main(model_size=model_size, **kwargs)
 
