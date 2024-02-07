@@ -140,7 +140,10 @@ class TransformerWithHead(PreTrainedModel):
             if not param.requires_grad:
                 continue
             if name in state_dict:
-                param.data.add_((state_dict[name] - param.data) * update_coef)
+                param.data = (
+                    param.data + 
+                    (state_dict[name] - param.data) * update_coef
+                )
                 updated = True
         if not updated:
             raise ValueError("No parameters updated")
