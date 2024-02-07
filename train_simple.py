@@ -50,6 +50,8 @@ def main(
     # Set to a very large value so that by default we don't do any intermediate evals but
     # still do final evals (which requires eval_every to be set to a non-zero, non-None value)
     strong_eval_every: int = 10000000,
+    # non-positive values mean we don't save any checkpoints
+    save_every: int = 1000000,
     sync_command: Optional[str] = None,
     skip_if_exists: bool = False,
 ):  
@@ -103,6 +105,7 @@ def main(
         "linear_probe": linear_probe,
         "lr_schedule": lr_schedule,
         "strong_eval_every": strong_eval_every,
+        # "save_every": save_every,
         # "sweep_subfolder": sweep_subfolder,
     }
 
@@ -181,6 +184,7 @@ def main(
         sweep_subfolder=sweep_subfolder,
         config_name=config_name,
     )
+    # if os.path.exists(os.path.join(save_path, "results.pkl"))  and skip_if_exists:
     if os.path.exists(save_path) and os.listdir(save_path) and skip_if_exists:
         print(f"Skipping {save_path} because it already exists")
         return
@@ -221,6 +225,7 @@ def main(
         lr_schedule=lr_schedule,
         optimizer_name=optim,
         eval_every=eval_every,
+        save_every=save_every,
     )
 
     if weak_ds is not None:
