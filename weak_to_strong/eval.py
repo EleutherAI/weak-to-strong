@@ -78,7 +78,7 @@ def eval_model_acc(
         )
         gt, logprob = (
             torch.tensor([r["gt_label"] for r in results]),
-            torch.tensor([r["logprob"] for r in results])[:, 1],
+            torch.tensor([r["logprob"][1] for r in results]),
         )
         print("AUC against ground truth:", roc_auc_score(gt, logprob))
 
