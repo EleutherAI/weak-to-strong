@@ -121,6 +121,9 @@ def eval_model_accuracy_loss(
         f"requires_grad={any([p.requires_grad for p in model.parameters()])}"
     )
     print(f"train={model.training}")
+    print(f"device={io_device}")
+    print(f"batch_size={batch_size}")
+    print(f"minibatch_size={minibatch_size}")
 
     total_loss = None
     total_accuracy = None
