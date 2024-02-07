@@ -11,13 +11,11 @@ class TaskVectorModule(torch.nn.Module):
         self.kwargs = kwargs
 
     def forward(self):
-        acc = evaluate_task_vector_main(
+        return evaluate_task_vector_main(
             coef_best=self.coefs[0],
             coef_final=self.coefs[1],
             **self.kwargs
         )
-        loss = 1.0 - acc
-        return loss
 
 
 def main(

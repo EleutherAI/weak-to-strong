@@ -14,7 +14,7 @@ import wandb
 
 import weak_to_strong.logger as logger
 from weak_to_strong.common import clear_mem, to_batch
-from weak_to_strong.eval import eval_model_acc
+from weak_to_strong.eval import eval_model_acc, extract_accuracy
 from weak_to_strong.loss import kl_loss
 from weak_to_strong.config import ModelConfig
 
@@ -190,9 +190,7 @@ def train_model(
                     ).gradient_checkpointing_enable()
                 if train_with_dropout:
                     model.train()
-                eval_acc = float(
-                    np.mean([r["acc"] for r in eval_results])  # type: ignore
-                )
+                eval_acc = extract_accuracy(eval_results)
                 eval_acc_dict[step] = eval_acc
                 if eval_acc > max_acc and save_path:
                     save(
@@ -214,7 +212,7 @@ def train_model(
         print("Final evaluation:")
         assert eval_ds is not None, "must provide eval_ds if eval_every is not None"
         final_eval_results = eval_model_acc(model, eval_ds, eval_batch_size)
-        eval_acc = np.mean([r["acc"] for r in final_eval_results])
+        eval_acc = extract_accuracy(final_eval_results)
         logger.logkv("eval_accuracy", eval_acc)
         wandb.log({"eval/accuracy": eval_acc})
         logger.dumpkvs()
@@ -311,7 +309,7 @@ def train_and_save_model(
     inference_results = None
     if inference_ds:
         inference_results = eval_model_acc(model, inference_ds, eval_batch_size)
-        inf_acc = np.mean([r["acc"] for r in inference_results])
+        inf_acc = extract_accuracy(inference_results)
         logger.logkv("inference_accuracy", inf_acc)
         wandb.log({"inference/accuracy": inf_acc})
 

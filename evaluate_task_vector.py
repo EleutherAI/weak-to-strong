@@ -6,7 +6,7 @@ import torch
 from weak_to_strong.common import get_tokenizer
 from weak_to_strong.config import MODELS_DICT
 from weak_to_strong.datasets import tokenize_dataset
-from weak_to_strong.eval import eval_model_acc
+from weak_to_strong.eval import eval_model_acc, extract_accuracy, extract_ce_loss
 from train_simple import main as train_simple_main
 import fire
 
@@ -139,10 +139,10 @@ def main(
     if verbose:
         print("Evaluating model")
     test_results = eval_model_acc(model, test_ds, eval_batch_size)
-    accuracies = torch.stack([r["acc"] for r in test_results])  # type: ignore
-    test_acc = torch.mean(accuracies, dim=0)  # type: ignore
+    test_acc = extract_accuracy(test_results)
+    test_loss = extract_ce_loss(test_results)
     if verbose:
-        print(f"Test accuracy: {test_acc.item()}")
+        print(f"Test accuracy: {test_acc}")
 
     # Save results
     if store:
@@ -150,10 +150,10 @@ def main(
         with open(result_path, "r") as f:
             res_dict = json.load(f)
         key = f"task_vector_{coef_best_str}_{coef_final_str}"
-        res_dict[key] = test_acc.item()
+        res_dict[key] = test_acc
         with open(os.path.join(save_path, "results_summary.json"), "w") as f:
             json.dump(res_dict, f, indent=2)
-    return test_acc
+    return test_loss
 
 
 if __name__ == "__main__":

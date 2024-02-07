@@ -6,8 +6,18 @@ from sklearn.metrics import roc_auc_score
 from weak_to_strong.common import to_batch
 
 
-def to_numpy(x):
-    return x.detach().cpu().numpy()
+def unpack(x):
+    assert isinstance(x, torch.Tensor), type(x)
+    return x.detach().float().cpu().numpy().tolist()
+
+
+def extract_accuracy(results: datasets.Dataset) -> float:
+    return np.mean([r["acc"] for r in results])  # type: ignore
+
+
+def extract_ce_loss(results: datasets.Dataset) -> torch.Tensor:
+    losses = torch.stack([r["loss"] for r in results])  # type: ignore
+    return torch.mean(losses, dim=0)
 
 
 def eval_model_acc(
@@ -39,15 +49,21 @@ def eval_model_acc(
                 batch_first=True
             ).to(model.device if hasattr(model, "device") else "cpu")
             # run forward pass
-            logits = model(
+            raw_logits = model(
                 input_ids, choice_input_ids=batch.get("choice_input_ids")
             )
-            labels = torch.tensor(batch["soft_label"]).to(logits.device)
+            labels = batch["soft_label"]
+            raw_labels = torch.tensor(labels).to(raw_logits.device)
 
-            logprobs = torch.nn.functional.log_softmax(logits, dim=-1)
-            probs = logprobs.exp()
+            raw_logprobs = torch.nn.functional.log_softmax(raw_logits, dim=-1)
+            losses = torch.nn.functional.cross_entropy(
+                raw_logits, raw_labels, reduction="none"
+            )
+            logprobs = unpack(raw_logprobs)
+            probs = unpack(raw_logprobs.exp())
+            logits = unpack(raw_logits)
 
-            preds = torch.argmax(logprobs, dim=-1)
+            preds = torch.argmax(raw_logprobs, dim=-1)
             labels = torch.argmax(labels, dim=-1)
 
             results.extend(
@@ -61,8 +77,9 @@ def eval_model_acc(
                         logits=logit,
                         soft_label=prob,
                         logprob=logprob,
+                        loss=loss,
                     )
-                    for input_id, txt, label, pred, prob, logprob, logit in zip(
+                    for input_id, txt, label, pred, prob, logprob, logit, loss in zip(
                         batch["input_ids"],
                         batch["txt"],
                         labels,
@@ -70,10 +87,11 @@ def eval_model_acc(
                         probs,
                         logprobs,
                         logits,
+                        losses
                     )
                 ]
             )
-        accs = [to_numpy(r["acc"]) for r in results]
+        accs = [r["acc"] for r in results]
         print(
             "Accuracy against ground truth:",
             np.mean(accs),
@@ -81,8 +99,8 @@ def eval_model_acc(
             np.std(accs) / np.sqrt(len(accs)),
         )
         gt, logprob = (
-            np.array([to_numpy(r["gt_label"]) for r in results]),
-            np.array([to_numpy(r["logprob"]) for r in results])[:, 1],
+            np.array([r["gt_label"] for r in results]),
+            np.array([r["logprob"] for r in results])[:, 1],
         )
         print("AUC against ground truth:", roc_auc_score(gt, logprob))
 
