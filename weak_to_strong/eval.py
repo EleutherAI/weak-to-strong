@@ -31,7 +31,7 @@ def eval_model_acc(
         for batch in to_batch(ds, eval_batch_size):
             # pad input_ids to common length
             input_ids = torch.nn.utils.rnn.pad_sequence(
-                [torch.tensor(ex) for ex in batch["input_ids"]], 
+                [torch.tensor(ex) for ex in batch["input_ids"]],
                 batch_first=True
             ).to(model.device if hasattr(model, "device") else "cpu")
             # run forward pass
@@ -69,7 +69,7 @@ def eval_model_acc(
                     )
                 ]
             )
-        accs = [r["acc"] for r in results]
+        accs = [r["acc"].detach().cpu().numpy() for r in results]
         print(
             "Accuracy against ground truth:",
             np.mean(accs),
