@@ -103,6 +103,9 @@ def eval_model_acc(
                     )
                 ]
             )
+            assert isinstance(results[-1]["loss"], torch.Tensor), (
+                f"results[-1]['loss'] is not a tensor: {type(results[-1]['loss'])}"
+            )
         accs = [r["acc"] for r in results]
         print(
             "Accuracy against ground truth:",
@@ -115,5 +118,12 @@ def eval_model_acc(
             np.array([r["logprob"] for r in results])[:, 1],
         )
         print("AUC against ground truth:", roc_auc_score(gt, logprob))
+
+        assert isinstance(results[0]["loss"], torch.Tensor), (
+            f"results[0]['loss'] is not a tensor: {type(results[-1]['loss'])}"
+        )
+        assert isinstance(results[-1]["loss"], torch.Tensor), (
+            f"results[-1]['loss'] is not a tensor: {type(results[-1]['loss'])}"
+        )
 
         return datasets.Dataset.from_list(results)
