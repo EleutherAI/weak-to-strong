@@ -2,7 +2,6 @@ import numpy as np
 import os
 from weak_to_strong.config import MODELS_DICT
 from weak_to_strong.eval import eval_model_acc
-from weak_to_strong.model import update_model_incremental
 from train_simple import main as train_simple_main
 import fire
 
