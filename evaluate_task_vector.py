@@ -138,7 +138,7 @@ def main(
     result_path = os.path.join(save_path, "results_summary.json")
     with open(result_path, "r") as f:
         res_dict = json.load(f)
-    res_dict['task_vector'] = res_dict.get('task_vector', []) + [(coef_best, coef_final, test_acc)]
+    res_dict[f"task_vector_{coef_best:.1f}_{coef_final:.1f}"] = test_acc
     with open(os.path.join(save_path, "results_summary.json"), "w") as f:
         json.dump(res_dict, f, indent=2)
     return test_acc
