@@ -42,9 +42,9 @@ class ModelConfig:
     default_optimizer: str = "adam"
 
     def load_model(
-        self, 
-        batch_size: int, 
-        use_lm_head: bool, 
+        self,
+        batch_size: int,
+        use_lm_head: bool,
         minibatch_size_per_device: Optional[int] = None,
         num_labels: int = 2,
         linear_probe: bool = False,

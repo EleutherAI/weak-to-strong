@@ -58,7 +58,8 @@ def main(
     w2s_eval_every: int = 10000000,
     # If set, this command will be run to sync the results to remote storage
     sync_command: Optional[str] = None,
-):  
+    skip_if_exists: bool = False,
+):
     assert (
         ds_name in VALID_DATASETS
     ), f"Unknown dataset {ds_name} not in {VALID_DATASETS}"
@@ -179,6 +180,9 @@ def main(
         config["weak_model"] = weak_model_config
 
     save_path = os.path.join(results_folder, sweep_subfolder, config_name)
+    if skip_if_exists and os.path.exists(save_path) and os.listdir(save_path):
+        print(f"Skipping {save_path} because it already exists")
+        return save_path
     logger.configure(
         name="{sweep_subfolder}_{config_name}_{datetime_now}",
         save_path=save_path,
