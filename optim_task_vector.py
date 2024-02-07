@@ -24,9 +24,10 @@ def main(
     task_max_steps: int = 100,
     task_max_steps_wo_improvement: int = 5,
     task_log_every: int = 10,
+    task_device: str = "cuda",
     **kwargs
 ):
-    module = TaskVectorModule(**kwargs)
+    module = TaskVectorModule(**kwargs).to(task_device)
     trainable_params = list(module.parameters())
     # create optimizer
     if task_optim.lower() == "adam":
@@ -40,7 +41,7 @@ def main(
             f"invalid optimizer {task_optim}, must be adam or adafactor"
         )
     # train
-    best_loss = torch.tensor([1.0])
+    best_loss = torch.tensor([1.0], device=task_device)
     steps_wo_improvement = 0
     for step in range(task_max_steps):
         loss = module()
