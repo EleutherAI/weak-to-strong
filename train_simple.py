@@ -184,8 +184,8 @@ def main(
         sweep_subfolder=sweep_subfolder,
         config_name=config_name,
     )
-    # if os.path.exists(os.path.join(save_path, "results.pkl"))  and skip_if_exists:
-    if os.path.exists(save_path) and os.listdir(save_path) and skip_if_exists:
+    # if os.path.exists(save_path) and os.listdir(save_path) and skip_if_exists:
+    if os.path.exists(os.path.join(save_path, "results.pkl"))  and skip_if_exists:
         print(f"Skipping {save_path} because it already exists")
         return
     wandb.init(
