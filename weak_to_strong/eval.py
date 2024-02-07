@@ -34,11 +34,11 @@ def eval_model_acc(
                 [torch.tensor(ex) for ex in batch["input_ids"]], 
                 batch_first=True
             ).to(model.device if hasattr(model, "device") else "cpu")
-            labels = batch["soft_label"]
             # run forward pass
             logits = model(
                 input_ids, choice_input_ids=batch.get("choice_input_ids")
             )
+            labels = torch.tensor(batch["soft_label"]).to(logits.device)
 
             logprobs = torch.nn.functional.log_softmax(logits, dim=-1)
             probs = logprobs.exp()
