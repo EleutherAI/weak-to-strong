@@ -1,6 +1,8 @@
 import numpy as np
 import os
+from weak_to_strong.common import get_tokenizer
 from weak_to_strong.config import MODELS_DICT
+from weak_to_strong.datasets import tokenize_dataset
 from weak_to_strong.eval import eval_model_acc
 from train_simple import main as train_simple_main
 import fire
@@ -16,6 +18,7 @@ def main(
     ds_name: str = "sciq",
     w2s_eval_every: int = 1,
     seed: int = 0,
+    max_ctx: int = 1024,
     n_train1_docs: int = 1000,
     n_train2_docs: int = 1000,
     n_test_docs: int = 1000,
@@ -43,6 +46,8 @@ def main(
             How often to evaluate the model.
         seed: int
             Random seed.
+        max_ctx: int
+            Maximum context length.
         n_train1_docs: int
             Number of training documents for the first model.
         n_train2_docs: int
@@ -64,6 +69,7 @@ def main(
         ds_name=ds_name,
         w2s_eval_every=w2s_eval_every,
         seed=seed,
+        max_ctx=max_ctx,
         n_train1_docs=n_train1_docs,
         n_train2_docs=n_train2_docs,
         n_test_docs=n_test_docs,
@@ -77,6 +83,7 @@ def main(
         ds_name=ds_name,
         w2s_eval_every=w2s_eval_every,
         seed=seed,
+        max_ctx=max_ctx,
         n_train1_docs=n_train1_docs,
         n_train2_docs=n_train2_docs,
         n_test_docs=n_test_docs,
@@ -98,9 +105,11 @@ def main(
             test=n_test_docs
         ),
     )
+    test_ds = dataset["test"]  # type: ignore
+    tokenizer = get_tokenizer(model_config.name)
+    test_ds = tokenize_dataset(test_ds, tokenizer, max_ctx)  # type: ignore
 
-    eval_ds = dataset["test"]  # type: ignore
-    use_lm_head = "choice_input_ids" in eval_ds.features
+    use_lm_head = "choice_input_ids" in test_ds.features
 
     if verbose:
         print(f"Loading model {model_size}")
@@ -117,7 +126,9 @@ def main(
         print(f"coef_final={coef_final}, final_path={final_path}")
     model.update_state(final_path, coef_final)
 
-    test_results = eval_model_acc(model, eval_ds, eval_batch_size)
+    if verbose:
+        print("Evaluating model")
+    test_results = eval_model_acc(model, test_ds, eval_batch_size)
     return float(
         np.mean([r["acc"] for r in test_results])  # type: ignore
     )
