@@ -60,6 +60,17 @@ def eval_model_acc(
             losses = torch.nn.functional.cross_entropy(
                 raw_logits, raw_labels, reduction="none"
             )
+            assert isinstance(losses, torch.Tensor), (
+                f"losses is not a tensor: {type(losses)}"
+            )
+            assert losses.ndim == 1, f"losses.ndim: {losses.ndim}"
+            assert losses.shape[0] == raw_labels.shape[0], (
+                f"losses.shape[0]: {losses.shape[0]}, "
+                f"raw_labels.shape[0]: {raw_labels.shape[0]}"
+            )
+            assert isinstance(losses[0], torch.Tensor), (
+                f"losses[0] is not a tensor: {type(losses[0])}"
+            )
             logprobs = unpack(raw_logprobs)
             probs = unpack(raw_logprobs.exp())
             logits = unpack(raw_logits)
