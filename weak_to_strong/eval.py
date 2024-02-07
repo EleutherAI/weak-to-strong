@@ -63,8 +63,8 @@ def eval_model_acc(
             probs = unpack(raw_logprobs.exp())
             logits = unpack(raw_logits)
 
-            preds = torch.argmax(raw_logprobs, dim=-1)
-            labels = torch.argmax(labels, dim=-1)
+            preds = np.argmax(logprobs, axis=-1)
+            labels = np.argmax(labels, axis=-1)
 
             results.extend(
                 [
