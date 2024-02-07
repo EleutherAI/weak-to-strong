@@ -1,3 +1,4 @@
+import json
 import numpy as np
 import os
 from weak_to_strong.common import get_tokenizer
@@ -129,9 +130,20 @@ def main(
     if verbose:
         print("Evaluating model")
     test_results = eval_model_acc(model, test_ds, eval_batch_size)
-    return float(
-        np.mean([r["acc"] for r in test_results])  # type: ignore
-    )
+    test_acc = float(np.mean([r["acc"] for r in test_results]))  # type: ignore
+    if verbose:
+        print(f"Test accuracy: {test_acc}")
+
+    # Save results
+    result_path = os.path.join(save_path, "results_summary.json")
+    with open(result_path, "r") as f:
+        res_dict = json.load(f)
+    res_dict.update({
+        ("task_vector", coef_best, coef_final): test_acc
+    })
+    with open(os.path.join(save_path, "results_summary.json"), "w") as f:
+        json.dump(res_dict, f, indent=2)
+    return test_acc
 
 
 if __name__ == "__main__":
