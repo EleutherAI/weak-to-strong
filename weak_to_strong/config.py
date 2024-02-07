@@ -66,10 +66,12 @@ LARGE_BATCH_SIZE = 32
 
 # NOTE learning rates are not particularly tuned, work somewhat reasonably at train batch size 32
 # NOTE minibatch_size_per_device needs adjusting for GPU/dataset
+# NOTE minibatch_size_per_device needs adjusting for GPU/dataset
 MODEL_CONFIGS = [
     ModelConfig(
         name="gpt2",
         default_lr=5e-5,
+        eval_batch_size=LARGE_BATCH_SIZE,
         eval_batch_size=LARGE_BATCH_SIZE,
         lora_modules=GPT2_LORA_MODULES,
     ),
@@ -77,10 +79,13 @@ MODEL_CONFIGS = [
         name="gpt2-medium",
         default_lr=5e-5,
         eval_batch_size=LARGE_BATCH_SIZE,
+        eval_batch_size=LARGE_BATCH_SIZE,
         lora_modules=GPT2_LORA_MODULES,
     ),
     ModelConfig(
         name="gpt2-large",
+        default_lr=DEFAULT_DEFAULT_LR,
+        eval_batch_size=LARGE_BATCH_SIZE,
         default_lr=DEFAULT_DEFAULT_LR,
         eval_batch_size=LARGE_BATCH_SIZE,
         lora_modules=GPT2_LORA_MODULES,
@@ -98,10 +103,18 @@ MODEL_CONFIGS = [
         default_lr=DEFAULT_DEFAULT_LR,
         eval_batch_size=LARGE_BATCH_SIZE,
         minibatch_size_per_device=LARGE_BATCH_SIZE,
+        name="EleutherAI/pythia-14m",
+        default_lr=DEFAULT_DEFAULT_LR,
+        eval_batch_size=LARGE_BATCH_SIZE,
+        minibatch_size_per_device=LARGE_BATCH_SIZE,
         model_parallel=False,
         lora_modules=GPT_NEOX_LORA_MODULES,
     ),
     ModelConfig(
+        name="EleutherAI/pythia-70m",
+        default_lr=DEFAULT_DEFAULT_LR,
+        eval_batch_size=LARGE_BATCH_SIZE,
+        minibatch_size_per_device=LARGE_BATCH_SIZE,
         name="EleutherAI/pythia-70m",
         default_lr=DEFAULT_DEFAULT_LR,
         eval_batch_size=LARGE_BATCH_SIZE,
@@ -114,11 +127,17 @@ MODEL_CONFIGS = [
         default_lr=DEFAULT_DEFAULT_LR,
         eval_batch_size=LARGE_BATCH_SIZE,
         minibatch_size_per_device=LARGE_BATCH_SIZE,
+        default_lr=DEFAULT_DEFAULT_LR,
+        eval_batch_size=LARGE_BATCH_SIZE,
+        minibatch_size_per_device=LARGE_BATCH_SIZE,
         model_parallel=False,
         lora_modules=GPT_NEOX_LORA_MODULES,
     ),
     ModelConfig(
         name="EleutherAI/pythia-410m",
+        default_lr=DEFAULT_DEFAULT_LR,
+        eval_batch_size=LARGE_BATCH_SIZE,
+        minibatch_size_per_device=LARGE_BATCH_SIZE,
         default_lr=DEFAULT_DEFAULT_LR,
         eval_batch_size=LARGE_BATCH_SIZE,
         minibatch_size_per_device=LARGE_BATCH_SIZE,
@@ -130,8 +149,20 @@ MODEL_CONFIGS = [
         default_lr=DEFAULT_DEFAULT_LR,
         eval_batch_size=LARGE_BATCH_SIZE,
         minibatch_size_per_device=LARGE_BATCH_SIZE,
+        default_lr=DEFAULT_DEFAULT_LR,
+        eval_batch_size=LARGE_BATCH_SIZE,
+        minibatch_size_per_device=LARGE_BATCH_SIZE,
         model_parallel=False,
         lora_modules=GPT_NEOX_LORA_MODULES,
+    ),
+    ModelConfig(
+        name="EleutherAI/pythia-6.9b",
+        default_lr=DEFAULT_DEFAULT_LR,
+        eval_batch_size=SMALL_BATCH_SIZE,
+        minibatch_size_per_device=SMALL_BATCH_SIZE,
+        model_parallel=False,
+        lora_modules=GPT_NEOX_LORA_MODULES,
+        custom_kwargs=BFLOAT_KWARGS,
     ),
     ModelConfig(
         name="EleutherAI/pythia-6.9b",
@@ -252,14 +283,19 @@ MODEL_CONFIGS = [
         model_parallel=True,
         # note: probably need bf16 support and many gpus
         custom_kwargs=QWEN_KWARGS,
+        # note: probably need bf16 support and many gpus
+        custom_kwargs=QWEN_KWARGS,
     ),
     ModelConfig(
         name="Qwen/Qwen-72B",
+        default_lr=DEFAULT_DEFAULT_LR,
         default_lr=DEFAULT_DEFAULT_LR,
         eval_batch_size=1,
         lora_modules=QWEN_LORA_MODULES,
         gradient_checkpointing=True,
         model_parallel=True,
+        # note: probably need bf16 support and many gpus
+        custom_kwargs=QWEN_KWARGS,
         # note: probably need bf16 support and many gpus
         custom_kwargs=QWEN_KWARGS,
         # This model is really big, save space by using adafactor.
