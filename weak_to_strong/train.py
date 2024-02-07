@@ -38,7 +38,7 @@ def train_model(
     batch_size: int,
     lr: float = 1e-5,
     loss_fn: Callable = kl_loss,
-    log_every: int = 400,
+    log_every: Optional[int] = None,
     eval_every: Optional[int] = None,
     eval_batch_size: int = 256,
     minibatch_size: int = 8,
@@ -111,34 +111,6 @@ def train_model(
     for epoch in range(epochs):
         for start in range(0, len(ds), batch_size):
             loss_tot = 0
-            if eval_every and (step + 1) % eval_every == 0:
-                assert (
-                    eval_ds is not None
-                ), "must provide eval_ds if eval_every is not None"
-                eval_results = eval_model_acc(model, eval_ds, eval_batch_size)
-                if gradient_checkpointing:
-                    (
-                        model
-                        if hasattr(model, "gradient_checkpointing_enable")
-                        else model.module
-                    ).gradient_checkpointing_enable()
-                if train_with_dropout:
-                    model.train()
-                eval_acc = float(
-                    np.mean([r["acc"] for r in eval_results])  # type: ignore
-                )
-                eval_acc_dict[step] = eval_acc
-                if eval_acc > max_acc and save_path:
-                    save(
-                        model,
-                        save_path,
-                        "best_model",
-                        optimizer,
-                        lr_scheduler
-                    )
-                max_acc = max(max_acc, eval_acc)
-                logger.logkv("eval_accuracy", eval_acc)
-                wandb.log({"eval/accuracy": eval_acc})
             all_logits = []
             all_labels = []
             for mbatch in to_batch(
@@ -205,6 +177,34 @@ def train_model(
                 losses = []
                 accuracies = []
                 aurocs = []
+            if eval_every and step % eval_every == 0:
+                assert (
+                    eval_ds is not None
+                ), "must provide eval_ds if eval_every is not None"
+                eval_results = eval_model_acc(model, eval_ds, eval_batch_size)
+                if gradient_checkpointing:
+                    (
+                        model
+                        if hasattr(model, "gradient_checkpointing_enable")
+                        else model.module
+                    ).gradient_checkpointing_enable()
+                if train_with_dropout:
+                    model.train()
+                eval_acc = float(
+                    np.mean([r["acc"] for r in eval_results])  # type: ignore
+                )
+                eval_acc_dict[step] = eval_acc
+                if eval_acc > max_acc and save_path:
+                    save(
+                        model,
+                        save_path,
+                        "best_model",
+                        optimizer,
+                        lr_scheduler
+                    )
+                max_acc = max(max_acc, eval_acc)
+                logger.logkv("eval_accuracy", eval_acc)
+                wandb.log({"eval/accuracy": eval_acc})
 
             step += 1
             logger.dumpkvs()
@@ -242,6 +242,7 @@ def train_and_save_model(
     lr_schedule: str = "constant",
     optimizer_name: str = "adam",
     eval_every: Optional[int] = None,
+    log_every: Optional[int] = None,
 ) -> tuple:
     if eval_batch_size is None:
         eval_batch_size = batch_size
@@ -276,8 +277,8 @@ def train_and_save_model(
 
     # Load the model
     model, minibatch_size = model_config.load_model(
-        batch_size=batch_size, 
-        use_lm_head=use_lm_head, 
+        batch_size=batch_size,
+        use_lm_head=use_lm_head,
         linear_probe=linear_probe,
         minibatch_size_per_device=minibatch_size_per_device,
     )
@@ -299,6 +300,7 @@ def train_and_save_model(
             loss_fn=loss_fn,
             eval_batch_size=eval_batch_size,
             eval_every=eval_every,
+            log_every=log_every,
             minibatch_size=minibatch_size,
             train_with_dropout=train_with_dropout,
             lr_schedule=lr_schedule,

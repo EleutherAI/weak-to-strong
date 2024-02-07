@@ -56,6 +56,7 @@ def main(
     # still do final evals (which requires eval_every to be set to a non-zero, non-None value).
     # Grount-truth fine-tuning does not do any intermediate evals.
     w2s_eval_every: int = 10000000,
+    w2s_log_every: int = 100,
     # If set, this command will be run to sync the results to remote storage
     sync_command: Optional[str] = None,
     skip_if_exists: bool = False,
@@ -70,6 +71,7 @@ def main(
 
     is_w2s = weak_labels_path is not None or weak_model_size is not None
     eval_every = w2s_eval_every if is_w2s else 10000000
+    log_every = w2s_log_every if is_w2s else None
     epochs = w2s_epochs if is_w2s else gt_epochs
     loss = loss if is_w2s else "xent"
 
@@ -226,6 +228,7 @@ def main(
         lr_schedule=lr_schedule,
         optimizer_name=optim,
         eval_every=eval_every,
+        log_every=log_every,
     )
 
     if weak_ds is not None:
