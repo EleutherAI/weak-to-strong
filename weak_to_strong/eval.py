@@ -1,3 +1,4 @@
+from typing import Tuple
 import datasets
 import numpy as np
 import torch
@@ -15,12 +16,6 @@ def extract_accuracy(results: datasets.Dataset) -> float:
     return np.mean([r["acc"] for r in results])  # type: ignore
 
 
-def extract_ce_loss(results: datasets.Dataset) -> torch.Tensor:
-    print("extract_ce_loss", type(results[0]["loss"]))
-    losses = torch.cat([r["loss"] for r in results])  # type: ignore
-    return torch.mean(losses, dim=0)
-
-
 def eval_model_acc(
     model: nn.Module, ds: datasets.Dataset, eval_batch_size: int = 16
 ) -> datasets.Dataset:
@@ -32,10 +27,9 @@ def eval_model_acc(
     ds (datasets.Dataset): The dataset on which the model is to be evaluated.
 
     Returns:
-    results (list): 
-        A list of dictionaries containing the input_ids, ground truth label,
-        predicted label, accuracy of prediction, logits and soft label for
-        each example in the dataset.
+    results (list): A list of dictionaries containing the input_ids, ground truth label,
+                    predicted label, accuracy of prediction, logits and soft label for
+                    each example in the dataset.
     """
 
     model.eval()
@@ -46,31 +40,15 @@ def eval_model_acc(
         for batch in to_batch(ds, eval_batch_size):
             # pad input_ids to common length
             input_ids = torch.nn.utils.rnn.pad_sequence(
-                [torch.tensor(ex) for ex in batch["input_ids"]],
-                batch_first=True
+                [torch.tensor(ex) for ex in batch["input_ids"]], batch_first=True
             ).to(model.device if hasattr(model, "device") else "cpu")
+            labels = batch["soft_label"]
             # run forward pass
             raw_logits = model(
                 input_ids, choice_input_ids=batch.get("choice_input_ids")
             )
-            labels = batch["soft_label"]
-            raw_labels = torch.tensor(labels).to(raw_logits.device)
 
             raw_logprobs = torch.nn.functional.log_softmax(raw_logits, dim=-1)
-            losses = torch.nn.functional.cross_entropy(
-                raw_logits, raw_labels, reduction="none"
-            )
-            assert isinstance(losses, torch.Tensor), (
-                f"losses is not a tensor: {type(losses)}"
-            )
-            assert losses.ndim == 1, f"losses.ndim: {losses.ndim}"
-            assert losses.shape[0] == raw_labels.shape[0], (
-                f"losses.shape[0]: {losses.shape[0]}, "
-                f"raw_labels.shape[0]: {raw_labels.shape[0]}"
-            )
-            assert isinstance(losses[0], torch.Tensor), (
-                f"losses[0] is not a tensor: {type(losses[0])}"
-            )
             logprobs = unpack(raw_logprobs)
             probs = unpack(raw_logprobs.exp())
             logits = unpack(raw_logits)
@@ -89,9 +67,8 @@ def eval_model_acc(
                         logits=logit,
                         soft_label=prob,
                         logprob=logprob,
-                        loss=loss,
                     )
-                    for input_id, txt, label, pred, prob, logprob, logit, loss in zip(
+                    for input_id, txt, label, pred, prob, logprob, logit in zip(
                         batch["input_ids"],
                         batch["txt"],
                         labels,
@@ -99,12 +76,8 @@ def eval_model_acc(
                         probs,
                         logprobs,
                         logits,
-                        losses
                     )
                 ]
-            )
-            assert isinstance(results[-1]["loss"], torch.Tensor), (
-                f"results[-1]['loss'] is not a tensor: {type(results[-1]['loss'])}"
             )
         accs = [r["acc"] for r in results]
         print(
@@ -119,11 +92,65 @@ def eval_model_acc(
         )
         print("AUC against ground truth:", roc_auc_score(gt, logprob))
 
-        assert isinstance(results[0]["loss"], torch.Tensor), (
-            f"results[0]['loss'] is not a tensor: {type(results[-1]['loss'])}"
-        )
-        assert isinstance(results[-1]["loss"], torch.Tensor), (
-            f"results[-1]['loss'] is not a tensor: {type(results[-1]['loss'])}"
-        )
-
         return datasets.Dataset.from_list(results)
+    
+
+def eval_model_accuracy_loss(
+    model: nn.Module, ds: datasets.Dataset, eval_batch_size: int = 16
+) -> Tuple[torch.Tensor, torch.Tensor]:
+    """
+    This function evaluates the accuracy and CE loss of a given model on
+    a given dataset.
+
+    Parameters:
+    model (nn.Module): The model to be evaluated.
+    ds (datasets.Dataset): The dataset on which the model is to be evaluated.
+
+    Returns:
+    accuracy (float): The accuracy of the model on the given dataset.
+    ce_loss (torch.Tensor): The cross-entropy loss of the model on the
+        given dataset.
+    """
+
+    model.eval()
+
+    total_loss = None
+    total_accuracy = None
+    n_batches = 0
+    with torch.no_grad():
+        for batch in to_batch(ds, eval_batch_size):
+            # pad input_ids to common length
+            input_ids = torch.nn.utils.rnn.pad_sequence(
+                [torch.tensor(ex) for ex in batch["input_ids"]],
+                batch_first=True
+            ).to(model.device if hasattr(model, "device") else "cpu")
+            # run forward pass
+            raw_logits = model(
+                input_ids, choice_input_ids=batch.get("choice_input_ids")
+            )
+            labels = batch["soft_label"]
+            raw_labels = torch.tensor(labels).to(raw_logits.device)
+
+            raw_logprobs = torch.nn.functional.log_softmax(raw_logits, dim=-1)
+            batch_loss = torch.nn.functional.cross_entropy(
+                raw_logits, raw_labels, reduction="mean"
+            )
+
+            preds = torch.argmax(raw_logprobs, dim=-1)
+            labels = torch.argmax(raw_labels, dim=-1)
+
+            batch_acc = torch.mean((preds == labels).float())
+            if total_loss is None:
+                total_loss = batch_loss
+            else:
+                total_loss += batch_loss
+            if total_accuracy is None:
+                total_accuracy = batch_acc
+            else:
+                total_accuracy += batch_acc
+            n_batches += 1
+    assert total_loss is not None
+    assert total_accuracy is not None
+    total_accuracy /= n_batches
+    total_loss /= n_batches
+    return total_accuracy, total_loss
