@@ -6,9 +6,8 @@ from sklearn.metrics import roc_auc_score
 from weak_to_strong.common import to_batch
 
 
-def unpack(x: torch.Tensor) -> float:
-    assert isinstance(x, torch.Tensor), type(x)
-    return x.detach().float().cpu().numpy().item()
+def to_numpy(x):
+    return x.detach().cpu().numpy()
 
 
 def eval_model_acc(
@@ -22,7 +21,7 @@ def eval_model_acc(
     ds (datasets.Dataset): The dataset on which the model is to be evaluated.
 
     Returns:
-    results (list):
+    results (list): 
         A list of dictionaries containing the input_ids, ground truth label,
         predicted label, accuracy of prediction, logits and soft label for
         each example in the dataset.
@@ -59,9 +58,9 @@ def eval_model_acc(
                         gt_label=label,
                         hard_label=pred,
                         acc=label == pred,
-                        logits=unpack(logit),
-                        soft_label=unpack(prob),
-                        logprob=unpack(logprob),
+                        logits=logit,
+                        soft_label=prob,
+                        logprob=logprob,
                     )
                     for input_id, txt, label, pred, prob, logprob, logit in zip(
                         batch["input_ids"],
@@ -74,7 +73,7 @@ def eval_model_acc(
                     )
                 ]
             )
-        accs = [unpack(r["acc"]) for r in results]
+        accs = [to_numpy(r["acc"]) for r in results]
         print(
             "Accuracy against ground truth:",
             np.mean(accs),
@@ -82,8 +81,8 @@ def eval_model_acc(
             np.std(accs) / np.sqrt(len(accs)),
         )
         gt, logprob = (
-            np.array([r["gt_label"] for r in results]),
-            np.array([r["logprob"] for r in results])[:, 1],
+            np.array([to_numpy(r["gt_label"]) for r in results]),
+            np.array([to_numpy(r["logprob"]) for r in results])[:, 1],
         )
         print("AUC against ground truth:", roc_auc_score(gt, logprob))
 
