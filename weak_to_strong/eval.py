@@ -16,7 +16,8 @@ def extract_accuracy(results: datasets.Dataset) -> float:
 
 
 def extract_ce_loss(results: datasets.Dataset) -> torch.Tensor:
-    losses = torch.stack([r["loss"] for r in results])  # type: ignore
+    print("extract_ce_loss", type(results[0]["loss"]))
+    losses = torch.cat([r["loss"] for r in results])  # type: ignore
     return torch.mean(losses, dim=0)
 
 
