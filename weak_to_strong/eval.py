@@ -4,7 +4,7 @@ import numpy as np
 import torch
 from torch import nn
 from sklearn.metrics import roc_auc_score
-from weak_to_strong.common import to_batch
+from weak_to_strong.common import clear_mem, to_batch
 
 
 def unpack(x):
@@ -114,6 +114,7 @@ def eval_model_accuracy_loss(
     ce_loss (torch.Tensor): The cross-entropy loss of the model on the
         given dataset.
     """
+    clear_mem(verbose=True)
     model.eval()
     io_device = model.device if hasattr(model, "device") else 0
     print("Evaluating model accuracy and loss")
