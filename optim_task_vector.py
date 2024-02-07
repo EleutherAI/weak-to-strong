@@ -4,6 +4,22 @@ from evaluate_task_vector import main as evaluate_task_vector_main
 import fire
 
 
+class TaskVectorModule(torch.nn.Module):
+    def __init__(self, **kwargs):
+        super().__init__()
+        self.coefs = torch.nn.Parameter(torch.zeros(2))
+        self.kwargs = kwargs
+
+    def forward(self):
+        acc = evaluate_task_vector_main(
+            coef_best=self.coefs[0],
+            coef_final=self.coefs[1],
+            **self.kwargs
+        )
+        loss = 1.0 - acc
+        return loss
+
+
 def main(
     task_optim: str = "adam",
     task_lr: float = 1e-4,
@@ -12,8 +28,8 @@ def main(
     task_log_every: int = 10,
     **kwargs
 ):
-    # create params for pair of coefs
-    trainable_params = torch.nn.Parameter(torch.zeros(2))
+    module = TaskVectorModule(**kwargs)
+    trainable_params = list(module.parameters())
     # create optimizer
     if task_optim.lower() == "adam":
         optimizer = torch.optim.Adam(
@@ -29,12 +45,7 @@ def main(
     best_loss = torch.tensor([1.0])
     steps_wo_improvement = 0
     for step in range(task_max_steps):
-        acc = evaluate_task_vector_main(
-            coef_best=trainable_params[0],
-            coef_final=trainable_params[1],
-            **kwargs
-        )
-        loss = 1.0 - acc
+        loss = module()
         if step % task_log_every == 0:
             print(f"step: {step}, loss: {loss.item()}")
         if loss < best_loss:
@@ -48,7 +59,7 @@ def main(
         loss.backward()
         optimizer.step()
     print(f"best_loss: {best_loss.item()}")
-    print(f"best_coefs: {trainable_params.detach().tolist()}")
+    print(f"best_coefs: {module.coefs.detach().tolist()}")
 
 
 if __name__ == "__main__":
