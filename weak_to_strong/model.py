@@ -1,114 +1,8 @@
 from dataclasses import dataclass
-from functools import partial
-import gc
-import json
-import os
 import torch
 from transformers import AutoConfig, AutoModelForCausalLM, PreTrainedModel
-from transformers.modeling_utils import (
-    WEIGHTS_INDEX_NAME,
-    SAFE_WEIGHTS_INDEX_NAME,
-    is_safetensors_available,
-    safe_load_file,
-    logger,
-    is_torch_greater_or_equal_than_1_13,
-)
 from peft import get_peft_model, LoraConfig, TaskType, PeftType  # type: ignore
 from typing import Optional
-
-
-def update_sharded_checkpoint(
-    model, folder, update_coef: float = 1.0, strict=True, prefer_safe=True
-):
-    """
-    This is the same as transformers.modeling_utils.update_sharded_checkpoint,
-    but with  the new update_coef parameter, allowing incremental updates to
-    the model weights.
-    See START OF CHANGE below.
-    """
-    # Load the index
-    index_file = os.path.join(folder, WEIGHTS_INDEX_NAME)
-    safe_index_file = os.path.join(folder, SAFE_WEIGHTS_INDEX_NAME)
-
-    index_present = os.path.isfile(index_file)
-    safe_index_present = os.path.isfile(safe_index_file)
-
-    if not index_present and not (
-        safe_index_present and is_safetensors_available()
-    ):
-        filenames = (
-            (WEIGHTS_INDEX_NAME, SAFE_WEIGHTS_INDEX_NAME)
-            if is_safetensors_available() else (WEIGHTS_INDEX_NAME,)
-        )
-        raise ValueError(
-            f"Can't find a checkpoint index ({' or '.join(filenames)})"
-            f" in {folder}."
-        )
-
-    load_safe = False
-    if safe_index_present:
-        if prefer_safe:
-            if is_safetensors_available():
-                load_safe = True  # load safe due to preference
-            else:
-                logger.warning(
-                    f"Cannot load sharded checkpoint at {folder} safely since "
-                    "safetensors is not installed!"
-                )
-        elif not index_present:
-            load_safe = True  # load safe since we have no other choice
-
-    load_index = safe_index_file if load_safe else index_file
-
-    with open(load_index, "r", encoding="utf-8") as f:
-        index = json.load(f)
-
-    shard_files = list(set(index["weight_map"].values()))
-
-    # If strict=True, error before loading any of the state dicts.
-    loaded_keys = index["weight_map"].keys()
-    model_keys = model.state_dict().keys()
-    missing_keys = [key for key in model_keys if key not in loaded_keys]
-    unexpected_keys = [key for key in loaded_keys if key not in model_keys]
-    if strict and (len(missing_keys) > 0 or len(unexpected_keys) > 0):
-        error_message = (
-            f"Error(s) in loading state_dict for {model.__class__.__name__}"
-        )
-        if len(missing_keys) > 0:
-            str_missing_keys = ",".join([f'"{k}"' for k in missing_keys])
-            error_message += f"\nMissing key(s): {str_missing_keys}."
-        if len(unexpected_keys) > 0:
-            str_unexpected_keys = ",".join([f'"{k}"' for k in unexpected_keys])
-            error_message += f"\nMissing key(s): {str_unexpected_keys}."
-        raise RuntimeError(error_message)
-
-    if is_torch_greater_or_equal_than_1_13:
-        weights_only_kwarg = {"weights_only": True}
-    else:
-        weights_only_kwarg = {}
-    loader = safe_load_file if load_safe else partial(
-        torch.load, map_location="cpu", **weights_only_kwarg
-    )
-
-    for shard_file in shard_files:
-        state_dict = loader(os.path.join(folder, shard_file))
-        
-        # START OF CHANGE
-        # Update each weight using the given formula
-        for name, param in model.named_parameters():
-            if name in state_dict:
-                update = update_coef * (state_dict[name] - param.data)
-                param.data.add_(update)
-        # END OF CHANGE
-
-        # Make sure memory is freed before we load the next state dict.
-        del state_dict
-        gc.collect()
-
-    # Return the same thing as PyTorch load_state_dict function.
-    return torch.nn.modules.module._IncompatibleKeys(
-        missing_keys, unexpected_keys
-    )
 
 
 @dataclass
@@ -232,3 +126,15 @@ class TransformerWithHead(PreTrainedModel):
             logits = self.score(hidden_states)
 
         return logits
+    
+    def update_state(self, path: str, update_coef: float = 1.0):
+        state_dict = torch.load(path)
+        state_dict = {
+            k.replace("transformer.module", "transformer"): v
+            for (k, v) in state_dict.items()
+        }
+
+        # directly update model state using update_coef
+        for name, param in self.named_parameters():
+            if name in state_dict:
+                param.data.add_((state_dict[name] - param.data) * update_coef)

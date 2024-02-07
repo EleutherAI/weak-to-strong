@@ -2,7 +2,7 @@ import numpy as np
 import os
 from weak_to_strong.config import MODELS_DICT
 from weak_to_strong.eval import eval_model_acc
-from weak_to_strong.model import update_sharded_checkpoint
+from weak_to_strong.model import update_model_incremental
 from train_simple import main as train_simple_main
 import fire
 
@@ -113,10 +113,10 @@ def main(
     if verbose:
         print("Updating model weights")
         print(f"coef_best={coef_best}, best_path={best_path}")
-    update_sharded_checkpoint(model, best_path, coef_best)
+    model.update_state(best_path, coef_best)
     if verbose:
         print(f"coef_final={coef_final}, final_path={final_path}")
-    update_sharded_checkpoint(model, final_path, coef_final)
+    model.update_state(final_path, coef_final)
 
     test_results = eval_model_acc(model, eval_ds, eval_batch_size)
     return float(
