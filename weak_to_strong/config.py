@@ -3,10 +3,34 @@ from dataclasses import dataclass
 from typing import Optional
 
 from weak_to_strong.loss import logconf_loss_fn, product_loss_fn, xent_loss, kl_loss
+from weak_to_strong.model import TransformerWithHead
+
+MODEL_TYPE = TransformerWithHead | torch.nn.DataParallel[TransformerWithHead]
 
 
 @dataclass
 class ModelConfig:
+    """Configuration for a model used in LORA finetuning.
+    Arguments:
+        name: str
+            The name of the model, e.g. "gpt2", "gpt2-medium", etc.
+        default_lr: float
+            The default learning rate for the model.
+        eval_batch_size: int
+            The batch size to use for evaluation.
+        minibatch_size_per_device: Optional[int]
+            The minibatch size per device to use for training. If None, the default is 1.
+        lora_modules: Optional[list[str]]
+            The LoRA modules to use for the model. If None, the default is None.
+        custom_kwargs: Optional[dict]
+            Custom keyword arguments to pass to the model. If None, the default is None.
+        gradient_checkpointing: bool
+            Whether to use gradient checkpointing. The default is False.
+        model_parallel: bool
+            Whether to use model parallel. The default is False.
+        default_optimizer: str
+            The default optimizer to use for the model. The default is "adam".
+    """
     name: str
     default_lr: float
     eval_batch_size: int
@@ -16,6 +40,60 @@ class ModelConfig:
     gradient_checkpointing: bool = False
     model_parallel: bool = False
     default_optimizer: str = "adam"
+
+    def load_model(
+        self, 
+        batch_size: int, 
+        use_lm_head: bool, 
+        minibatch_size_per_device: Optional[int] = None,
+        num_labels: int = 2,
+        linear_probe: bool = False,
+    ) -> tuple[MODEL_TYPE, int]:
+        custom_kwargs = self.custom_kwargs or {}
+        if minibatch_size_per_device is None:
+            minibatch_size_per_device = self.minibatch_size_per_device or 1
+        if self.model_parallel:
+            assert (
+                torch.cuda.device_count() > 1
+            ), f"you might want more gpus for {self.name}"
+            model = TransformerWithHead.from_pretrained(
+                self.name,
+                lora_modules=self.lora_modules,
+                use_lm_head=use_lm_head,
+                num_labels=num_labels,
+                device_map="auto",
+                linear_probe=linear_probe,
+                **custom_kwargs,
+            )
+            # slight misnomer, more like minibatch_size_per_dp_replica
+            minibatch_size = minibatch_size_per_device
+        else:
+            model = TransformerWithHead.from_pretrained(
+                self.name,
+                lora_modules=self.lora_modules,
+                use_lm_head=use_lm_head,
+                num_labels=num_labels,
+                linear_probe=linear_probe,
+                **custom_kwargs,
+            ).to(
+                "cuda"  # type: ignore
+            )
+            # data parallel:  currently not supported with model parallel
+            if torch.cuda.device_count() > 1:
+                model = torch.nn.DataParallel(model, output_device=0)
+                minibatch_size = min(
+                    minibatch_size_per_device * torch.cuda.device_count(), 
+                    batch_size
+                )
+                print(
+                    "Using",
+                    torch.cuda.device_count(),
+                    "GPUs, setting minibatch_size to",
+                    minibatch_size,
+                )
+            else:
+                minibatch_size = minibatch_size_per_device
+        return model, minibatch_size
 
 
 GPT_NEOX_LORA_MODULES = ["dense_h_to_4h", "dense_4h_to_h", "query_key_value"]

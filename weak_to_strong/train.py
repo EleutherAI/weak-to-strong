@@ -16,15 +16,18 @@ import weak_to_strong.logger as logger
 from weak_to_strong.common import clear_mem, to_batch
 from weak_to_strong.eval import eval_model_acc
 from weak_to_strong.loss import kl_loss
-from weak_to_strong.model import TransformerWithHead
 from weak_to_strong.config import ModelConfig
 
 
-def save(model: torch.nn.Module, save_path: str, optimizer=None, scheduler=None):
-    # Note: If the model is wrapped by DataParallel, we need to unwrap it before saving
+def save(
+    model: torch.nn.Module, save_path: str, name: str,
+    optimizer=None, scheduler=None
+):
+    # Note: If the model is wrapped by DataParallel, we need to
+    # unwrap it before saving
     model_to_save = model.module if hasattr(model, "module") else model
 
-    save_file = os.path.join(save_path, "pytorch_model.bin")
+    save_file = os.path.join(save_path, f"{name}.bin")
     model_to_save.save_torch(save_file, optimizer, scheduler)
     print("saved torch weights", save_file)
 
@@ -98,6 +101,7 @@ def train_model(
     accuracies = []
     aurocs = []
     eval_acc_dict = {}
+    max_acc = 0
 
     # If the model is wrapped by DataParallel, it doesn't have a device. In this case,
     # we use GPU 0 as the output device. This sadly means that this device will store
@@ -112,8 +116,6 @@ def train_model(
                     eval_ds is not None
                 ), "must provide eval_ds if eval_every is not None"
                 eval_results = eval_model_acc(model, eval_ds, eval_batch_size)
-                if save_path:
-                    save(model, save_path, optimizer, lr_scheduler)
                 if gradient_checkpointing:
                     (
                         model
@@ -124,6 +126,15 @@ def train_model(
                     model.train()
                 eval_acc = np.mean([r["acc"] for r in eval_results])  # type: ignore
                 eval_acc_dict[step] = eval_acc
+                max_acc = max(max_acc, eval_acc)
+                if eval_acc == max_acc and save_path:
+                    save(
+                        model,
+                        save_path,
+                        "best_model",
+                        optimizer,
+                        lr_scheduler
+                    )
                 logger.logkv("eval_accuracy", eval_acc)
                 wandb.log({"eval/accuracy": eval_acc})
             all_logits = []
@@ -206,7 +217,7 @@ def train_model(
         wandb.log({"eval/accuracy": eval_acc})
         logger.dumpkvs()
     if save_path:
-        save(model, save_path, optimizer, lr_scheduler)
+        save(model, save_path, "final_model", optimizer, lr_scheduler)
     return final_eval_results
 
 
@@ -243,14 +254,16 @@ def train_and_save_model(
     custom_kwargs = model_config.custom_kwargs or {}
 
     def maybe_load_model(model):
-        if os.path.exists(os.path.join(save_path, "results.pkl")) and not force_retrain:
+        pkl_path = os.path.join(save_path, "results.pkl")
+        if os.path.exists(pkl_path) and not force_retrain:
             print("loading from", save_path)
-            checkpoint_path = os.path.join(save_path, "pytorch_model.bin")
+            checkpoint_path = os.path.join(save_path, "final_model.bin")
             if not os.path.exists(checkpoint_path):
-                # Assume this means we have a sharded checkpoint, and load it appropriately
+                # Assume this means we have a sharded checkpoint, and
+                # load it appropriately
                 load_sharded_checkpoint(model, checkpoint_path)
             else:
-                state_dict = torch.load(os.path.join(save_path, "pytorch_model.bin"))
+                state_dict = torch.load(checkpoint_path)
                 state_dict = {
                     k.replace("transformer.module", "transformer"): v
                     for (k, v) in state_dict.items()
@@ -259,50 +272,14 @@ def train_and_save_model(
             return True
         return False
 
-    already_trained = False
     # Load the model
-    if model_config.model_parallel:
-        assert (
-            torch.cuda.device_count() > 1
-        ), f"you might want more gpus for {model_config.name}"
-        model = TransformerWithHead.from_pretrained(
-            model_config.name,
-            lora_modules=model_config.lora_modules,
-            use_lm_head=use_lm_head,
-            num_labels=2,
-            device_map="auto",
-            linear_probe=linear_probe,
-            **custom_kwargs,
-        )
-        already_trained = maybe_load_model(model)
-        # slight misnomer, more like minibatch_size_per_dp_replica
-        minibatch_size = minibatch_size_per_device
-    else:
-        model = TransformerWithHead.from_pretrained(
-            model_config.name,
-            lora_modules=model_config.lora_modules,
-            use_lm_head=use_lm_head,
-            num_labels=2,
-            linear_probe=linear_probe,
-            **custom_kwargs,
-        ).to(
-            "cuda"  # type: ignore
-        )
-        already_trained = maybe_load_model(model)
-        # data parallel:  currently not supported with model parallel
-        if torch.cuda.device_count() > 1:
-            model = torch.nn.DataParallel(model, output_device=0)
-            minibatch_size = min(
-                minibatch_size_per_device * torch.cuda.device_count(), batch_size
-            )
-            print(
-                "Using",
-                torch.cuda.device_count(),
-                "GPUs, setting minibatch_size to",
-                minibatch_size,
-            )
-        else:
-            minibatch_size = minibatch_size_per_device
+    model, minibatch_size = model_config.load_model(
+        batch_size=batch_size, 
+        use_lm_head=use_lm_head, 
+        linear_probe=linear_probe,
+        minibatch_size_per_device=minibatch_size_per_device,
+    )
+    already_trained = maybe_load_model(model)
 
     if already_trained:
         test_results = eval_model_acc(model, test_ds, eval_batch_size)
@@ -325,8 +302,7 @@ def train_and_save_model(
             lr_schedule=lr_schedule,
             optimizer_name=optimizer_name,
         )
-        print("Model training took", time.time() - start, "seconds")
-            
+        print("Model training took", time.time() - start, "seconds")    
 
     inference_results = None
     if inference_ds:
