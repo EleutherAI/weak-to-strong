@@ -111,7 +111,6 @@ def main(
         # "results_folder": results_folder,
         "linear_probe": linear_probe,
         "lr_schedule": lr_schedule,
-        "strong_eval_every": strong_eval_every,
         # "save_every": save_every,
         # "sweep_subfolder": sweep_subfolder,
     }
