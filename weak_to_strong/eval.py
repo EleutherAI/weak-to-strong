@@ -137,7 +137,7 @@ def eval_model_accuracy_loss(
             input_ids = torch.nn.utils.rnn.pad_sequence(
                 [torch.tensor(ex) for ex in mbatch["input_ids"]],
                 batch_first=True
-            ).to(io_device)
+            ).to(device=io_device)
             # run forward pass
             raw_logits = model(
                 input_ids, choice_input_ids=mbatch.get("choice_input_ids")

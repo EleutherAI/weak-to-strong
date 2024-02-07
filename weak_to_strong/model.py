@@ -141,8 +141,8 @@ class TransformerWithHead(PreTrainedModel):
                 continue
             if name in state_dict:
                 param.data = (
-                    param.data + 
-                    (state_dict[name] - param.data) * update_coef
+                    update_coef * state_dict[name] +
+                    (1 - update_coef) * param.data
                 )
                 updated = True
         if not updated:
