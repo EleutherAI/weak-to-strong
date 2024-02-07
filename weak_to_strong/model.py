@@ -126,7 +126,7 @@ class TransformerWithHead(PreTrainedModel):
             logits = self.score(hidden_states)
 
         return logits
-    
+
     def update_state(self, path: str, update_coef: float | torch.Tensor = 1.0):
         state_dict = torch.load(path)
         state_dict = {
@@ -135,6 +135,12 @@ class TransformerWithHead(PreTrainedModel):
         }
 
         # directly update model state using update_coef
+        updated = False
         for name, param in self.named_parameters():
+            if not param.requires_grad:
+                continue
             if name in state_dict:
                 param.data.add_((state_dict[name] - param.data) * update_coef)
+                updated = True
+        if not updated:
+            raise ValueError("No parameters updated")

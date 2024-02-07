@@ -138,6 +138,7 @@ def main(
 
     if verbose:
         print("Evaluating model")
+        print(f"model.requires_grad={any([p.requires_grad for p in model.parameters()])}")
     test_acc, test_loss = eval_model_accuracy_loss(
         model, test_ds, eval_batch_size
     )

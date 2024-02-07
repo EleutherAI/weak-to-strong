@@ -112,6 +112,11 @@ def eval_model_accuracy_loss(
         given dataset.
     """
     model.eval()
+    print("Evaluating model accuracy and loss")
+    print(
+        f"requires_grad={any([p.requires_grad for p in model.parameters()])}"
+    )
+    print(f"train={model.training}")
 
     total_loss = None
     total_accuracy = None
