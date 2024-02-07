@@ -111,7 +111,7 @@ def eval_model_accuracy_loss(
     ce_loss (torch.Tensor): The cross-entropy loss of the model on the
         given dataset.
     """
-
+    model.requires_grad_(False)
     model.eval()
 
     total_loss = None
@@ -150,6 +150,6 @@ def eval_model_accuracy_loss(
         n_batches += 1
     assert total_loss is not None
     assert total_accuracy is not None
-    total_accuracy /= n_batches
-    total_loss /= n_batches
-    return total_accuracy, total_loss
+    accuracy = total_accuracy / n_batches
+    ce_loss = total_loss / n_batches
+    return accuracy, ce_loss
