@@ -19,11 +19,14 @@ class ModelConfig:
         eval_batch_size: int
             The batch size to use for evaluation.
         minibatch_size_per_device: Optional[int]
-            The minibatch size per device to use for training. If None, the default is 1.
+            The minibatch size per device to use for training. 
+            If None, the default is 1.
         lora_modules: Optional[list[str]]
-            The LoRA modules to use for the model. If None, the default is None.
+            The LoRA modules to use for the model. 
+            If None, the default is None.
         custom_kwargs: Optional[dict]
-            Custom keyword arguments to pass to the model. If None, the default is None.
+            Custom keyword arguments to pass to the model. 
+            If None, the default is None.
         gradient_checkpointing: bool
             Whether to use gradient checkpointing. The default is False.
         model_parallel: bool
@@ -170,6 +173,11 @@ MODEL_CONFIGS = [
         minibatch_size_per_device=2,  # this needs adjusting for GPU/dataset
         model_parallel=False,
         lora_modules=GPT_NEOX_LORA_MODULES,
+        custom_kwargs={
+            "torch_dtype": torch.bfloat16  # we can only do this because we're using LoRA
+            if torch.cuda.is_bf16_supported()
+            else torch.float32,
+        },
     ),
     ModelConfig(
         name="EleutherAI/pythia-12b",

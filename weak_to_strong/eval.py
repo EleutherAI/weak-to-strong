@@ -93,10 +93,13 @@ def eval_model_acc(
         print("AUC against ground truth:", roc_auc_score(gt, logprob))
 
         return datasets.Dataset.from_list(results)
-    
+
 
 def eval_model_accuracy_loss(
-    model: nn.Module, ds: datasets.Dataset, eval_batch_size: int = 16
+    model: nn.Module,
+    ds: datasets.Dataset,
+    batch_size: int = 16,
+    minibatch_size: int = 8,
 ) -> Tuple[torch.Tensor, torch.Tensor]:
     """
     This function evaluates the accuracy and CE loss of a given model on
@@ -112,6 +115,7 @@ def eval_model_accuracy_loss(
         given dataset.
     """
     model.eval()
+    io_device = model.device if hasattr(model, "device") else 0
     print("Evaluating model accuracy and loss")
     print(
         f"requires_grad={any([p.requires_grad for p in model.parameters()])}"
@@ -121,37 +125,40 @@ def eval_model_accuracy_loss(
     total_loss = None
     total_accuracy = None
     n_batches = 0
-    for batch in to_batch(ds, eval_batch_size):
-        # pad input_ids to common length
-        input_ids = torch.nn.utils.rnn.pad_sequence(
-            [torch.tensor(ex) for ex in batch["input_ids"]],
-            batch_first=True
-        ).to(model.device if hasattr(model, "device") else "cpu")
-        # run forward pass
-        raw_logits = model(
-            input_ids, choice_input_ids=batch.get("choice_input_ids")
-        )
-        labels = batch["soft_label"]
-        raw_labels = torch.tensor(labels).to(raw_logits.device)
+    for start in range(0, len(ds), batch_size):
+        for mbatch in to_batch(
+            ds, minibatch_size, start=start, end=start + batch_size
+        ):
+            # pad input_ids to common length
+            input_ids = torch.nn.utils.rnn.pad_sequence(
+                [torch.tensor(ex) for ex in mbatch["input_ids"]],
+                batch_first=True
+            ).to(io_device)
+            # run forward pass
+            raw_logits = model(
+                input_ids, choice_input_ids=mbatch.get("choice_input_ids")
+            )
+            labels = mbatch["soft_label"]
+            raw_labels = torch.tensor(labels).to(raw_logits.device)
 
-        raw_logprobs = torch.nn.functional.log_softmax(raw_logits, dim=-1)
-        batch_loss = torch.nn.functional.cross_entropy(
-            raw_logits, raw_labels, reduction="mean"
-        )
+            raw_logprobs = torch.nn.functional.log_softmax(raw_logits, dim=-1)
+            batch_loss = torch.nn.functional.cross_entropy(
+                raw_logits, raw_labels, reduction="mean"
+            )
 
-        preds = torch.argmax(raw_logprobs, dim=-1)
-        labels = torch.argmax(raw_labels, dim=-1)
+            preds = torch.argmax(raw_logprobs, dim=-1)
+            labels = torch.argmax(raw_labels, dim=-1)
 
-        batch_acc = torch.mean((preds == labels).float())
-        if total_loss is None:
-            total_loss = batch_loss
-        else:
-            total_loss += batch_loss
-        if total_accuracy is None:
-            total_accuracy = batch_acc
-        else:
-            total_accuracy += batch_acc
-        n_batches += 1
+            batch_acc = torch.mean((preds == labels).float())
+            if total_loss is None:
+                total_loss = batch_loss
+            else:
+                total_loss += batch_loss
+            if total_accuracy is None:
+                total_accuracy = batch_acc
+            else:
+                total_accuracy += batch_acc
+            n_batches += 1
     assert total_loss is not None
     assert total_accuracy is not None
     accuracy = total_accuracy / n_batches

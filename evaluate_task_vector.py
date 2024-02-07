@@ -123,7 +123,7 @@ def main(
 
     if verbose:
         print(f"Loading model {model_size}")
-    model, _ = model_config.load_model(
+    model, minibatch_size = model_config.load_model(
         batch_size=eval_batch_size,
         use_lm_head=use_lm_head,
         linear_probe=linear_probe,
@@ -138,9 +138,15 @@ def main(
 
     if verbose:
         print("Evaluating model")
-        print(f"model.requires_grad={any([p.requires_grad for p in model.parameters()])}")
+        model_requires_grad = any([
+            p.requires_grad for p in model.parameters()
+        ])
+        print(f"requires_grad={model_requires_grad}")
     test_acc, test_loss = eval_model_accuracy_loss(
-        model, test_ds, eval_batch_size
+        model,
+        test_ds,
+        batch_size=eval_batch_size,
+        minibatch_size=minibatch_size,
     )
     if verbose:
         print(f"Test accuracy: {test_acc.item()}")
