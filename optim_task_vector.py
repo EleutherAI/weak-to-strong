@@ -28,6 +28,7 @@ def main(
     **kwargs
 ):
     module = TaskVectorModule(**kwargs).to(task_device)
+    assert module.coefs.requires_grad
     trainable_params = list(module.parameters())
     # create optimizer
     if task_optim.lower() == "adam":
@@ -45,6 +46,7 @@ def main(
     steps_wo_improvement = 0
     for step in range(task_max_steps):
         loss = module()
+        assert loss.requires_grad
         if step % task_log_every == 0:
             print(f"step: {step}, loss: {loss.item()}")
         if loss < best_loss:

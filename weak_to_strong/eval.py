@@ -117,38 +117,37 @@ def eval_model_accuracy_loss(
     total_loss = None
     total_accuracy = None
     n_batches = 0
-    with torch.no_grad():
-        for batch in to_batch(ds, eval_batch_size):
-            # pad input_ids to common length
-            input_ids = torch.nn.utils.rnn.pad_sequence(
-                [torch.tensor(ex) for ex in batch["input_ids"]],
-                batch_first=True
-            ).to(model.device if hasattr(model, "device") else "cpu")
-            # run forward pass
-            raw_logits = model(
-                input_ids, choice_input_ids=batch.get("choice_input_ids")
-            )
-            labels = batch["soft_label"]
-            raw_labels = torch.tensor(labels).to(raw_logits.device)
+    for batch in to_batch(ds, eval_batch_size):
+        # pad input_ids to common length
+        input_ids = torch.nn.utils.rnn.pad_sequence(
+            [torch.tensor(ex) for ex in batch["input_ids"]],
+            batch_first=True
+        ).to(model.device if hasattr(model, "device") else "cpu")
+        # run forward pass
+        raw_logits = model(
+            input_ids, choice_input_ids=batch.get("choice_input_ids")
+        )
+        labels = batch["soft_label"]
+        raw_labels = torch.tensor(labels).to(raw_logits.device)
 
-            raw_logprobs = torch.nn.functional.log_softmax(raw_logits, dim=-1)
-            batch_loss = torch.nn.functional.cross_entropy(
-                raw_logits, raw_labels, reduction="mean"
-            )
+        raw_logprobs = torch.nn.functional.log_softmax(raw_logits, dim=-1)
+        batch_loss = torch.nn.functional.cross_entropy(
+            raw_logits, raw_labels, reduction="mean"
+        )
 
-            preds = torch.argmax(raw_logprobs, dim=-1)
-            labels = torch.argmax(raw_labels, dim=-1)
+        preds = torch.argmax(raw_logprobs, dim=-1)
+        labels = torch.argmax(raw_labels, dim=-1)
 
-            batch_acc = torch.mean((preds == labels).float())
-            if total_loss is None:
-                total_loss = batch_loss
-            else:
-                total_loss += batch_loss
-            if total_accuracy is None:
-                total_accuracy = batch_acc
-            else:
-                total_accuracy += batch_acc
-            n_batches += 1
+        batch_acc = torch.mean((preds == labels).float())
+        if total_loss is None:
+            total_loss = batch_loss
+        else:
+            total_loss += batch_loss
+        if total_accuracy is None:
+            total_accuracy = batch_acc
+        else:
+            total_accuracy += batch_acc
+        n_batches += 1
     assert total_loss is not None
     assert total_accuracy is not None
     total_accuracy /= n_batches
