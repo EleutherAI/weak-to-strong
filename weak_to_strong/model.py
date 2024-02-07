@@ -127,7 +127,7 @@ class TransformerWithHead(PreTrainedModel):
 
         return logits
     
-    def update_state(self, path: str, update_coef: float = 1.0):
+    def update_state(self, path: str, update_coef: float | torch.Tensor = 1.0):
         state_dict = torch.load(path)
         state_dict = {
             k.replace("transformer.module", "transformer"): v

@@ -1,6 +1,8 @@
 import json
 import numpy as np
 import os
+
+import torch
 from weak_to_strong.common import get_tokenizer
 from weak_to_strong.config import MODELS_DICT
 from weak_to_strong.datasets import tokenize_dataset
@@ -12,8 +14,8 @@ from weak_to_strong.datasets import load_and_process_dataset
 
 
 def main(
-    coef_best: float,
-    coef_final: float,
+    coef_best: float | torch.Tensor,
+    coef_final: float | torch.Tensor,
     model_size: str = "mistralai/Mistral-7B-v0.1",
     weak_model_size: str = "gpt2",
     ds_name: str = "sciq",
@@ -24,9 +26,10 @@ def main(
     n_train2_docs: int = 1000,
     n_test_docs: int = 1000,
     linear_probe: bool = False,
+    store: bool = False,
     verbose: bool = False,
     **kwargs
-) -> float:
+) -> torch.Tensor:
     """Evaluate the task vector arithmetic on ground truth labels.
     Uses arithmetic
         w_base +
@@ -57,6 +60,8 @@ def main(
             Number of test documents.
         linear_probe: bool
             Whether to use a linear probe.
+        store: bool
+            Whether to store the results.
         verbose: bool
             Whether to print verbose output.
         **kwargs: dict
@@ -64,6 +69,10 @@ def main(
     Returns:
         Ground truth accuracy of the new model
     """
+    coef_best_float = float(coef_best)
+    coef_best_str = f"{coef_best_float:.1f}".replace(".", "_")
+    coef_final_float = float(coef_final)
+    coef_final_str = f"{coef_final_float:.1f}".replace(".", "_")
     # Train weak model on ground truth
     train_simple_main(
         model_size=weak_model_size,
@@ -121,26 +130,29 @@ def main(
     )
     if verbose:
         print("Updating model weights")
-        print(f"coef_best={coef_best}, best_path={best_path}")
+        print(f"coef_best={coef_best_float}, best_path={best_path}")
     model.update_state(best_path, coef_best)
     if verbose:
-        print(f"coef_final={coef_final}, final_path={final_path}")
+        print(f"coef_final={coef_final_float}, final_path={final_path}")
     model.update_state(final_path, coef_final)
 
     if verbose:
         print("Evaluating model")
     test_results = eval_model_acc(model, test_ds, eval_batch_size)
-    test_acc = float(np.mean([r["acc"] for r in test_results]))  # type: ignore
+    accuracies = torch.stack([r["acc"] for r in test_results])  # type: ignore
+    test_acc = torch.mean(accuracies, dim=0)  # type: ignore
     if verbose:
-        print(f"Test accuracy: {test_acc}")
+        print(f"Test accuracy: {test_acc.item()}")
 
     # Save results
-    result_path = os.path.join(save_path, "results_summary.json")
-    with open(result_path, "r") as f:
-        res_dict = json.load(f)
-    res_dict[f"task_vector_{coef_best:.1f}_{coef_final:.1f}"] = test_acc
-    with open(os.path.join(save_path, "results_summary.json"), "w") as f:
-        json.dump(res_dict, f, indent=2)
+    if store:
+        result_path = os.path.join(save_path, "results_summary.json")
+        with open(result_path, "r") as f:
+            res_dict = json.load(f)
+        key = f"task_vector_{coef_best_str}_{coef_final_str}"
+        res_dict[key] = test_acc.item()
+        with open(os.path.join(save_path, "results_summary.json"), "w") as f:
+            json.dump(res_dict, f, indent=2)
     return test_acc
 
 
