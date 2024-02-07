@@ -101,7 +101,7 @@ def train_model(
     accuracies = []
     aurocs = []
     eval_acc_dict = {}
-    max_acc = 0
+    max_acc = 0.0
 
     # If the model is wrapped by DataParallel, it doesn't have a device. In this case,
     # we use GPU 0 as the output device. This sadly means that this device will store
@@ -124,10 +124,11 @@ def train_model(
                     ).gradient_checkpointing_enable()
                 if train_with_dropout:
                     model.train()
-                eval_acc = np.mean([r["acc"] for r in eval_results])  # type: ignore
+                eval_acc = float(
+                    np.mean([r["acc"] for r in eval_results])  # type: ignore
+                )
                 eval_acc_dict[step] = eval_acc
-                max_acc = max(max_acc, eval_acc)
-                if eval_acc == max_acc and save_path:
+                if eval_acc > max_acc and save_path:
                     save(
                         model,
                         save_path,
@@ -135,6 +136,7 @@ def train_model(
                         optimizer,
                         lr_scheduler
                     )
+                max_acc = max(max_acc, eval_acc)
                 logger.logkv("eval_accuracy", eval_acc)
                 wandb.log({"eval/accuracy": eval_acc})
             all_logits = []

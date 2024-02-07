@@ -12,8 +12,8 @@ from weak_to_strong.datasets import load_and_process_dataset
 def main(
     coef_best: float,
     coef_final: float,
+    model_size: str = "mistralai/Mistral-7B-v0.1",
     weak_model_size: str = "gpt2",
-    strong_model_size: str = "mistralai/Mistral-7B-v0.1",
     ds_name: str = "sciq",
     w2s_eval_every: int = 1,
     seed: int = 0,
@@ -36,6 +36,8 @@ def main(
             Coefficient for the final model.
         model_size: str
             Model size to use.
+        weak_model_size: str
+            Weak model size to use.
         ds_name: str
             Dataset to use.
         w2s_eval_every: int
@@ -71,7 +73,7 @@ def main(
     )
     # Train strong model on weak labels
     save_path = train_simple_main(
-        model_size=strong_model_size,
+        model_size=model_size,
         weak_model_size=weak_model_size,
         ds_name=ds_name,
         w2s_eval_every=w2s_eval_every,
@@ -84,7 +86,7 @@ def main(
     )
     best_path = os.path.join(save_path, "best_model.bin")
     final_path = os.path.join(save_path, "final_model.bin")
-    model_config = MODELS_DICT[strong_model_size]
+    model_config = MODELS_DICT[model_size]
     eval_batch_size = model_config.eval_batch_size
 
     if verbose:
@@ -102,7 +104,7 @@ def main(
     use_lm_head = "choice_input_ids" in eval_ds.features
 
     if verbose:
-        print(f"Loading model {strong_model_size}")
+        print(f"Loading model {model_size}")
     model, _ = model_config.load_model(
         batch_size=eval_batch_size,
         use_lm_head=use_lm_head,
