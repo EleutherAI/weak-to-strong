@@ -6,7 +6,7 @@ import torch
 from weak_to_strong.common import get_tokenizer
 from weak_to_strong.config import MODELS_DICT
 from weak_to_strong.datasets import tokenize_dataset
-from weak_to_strong.eval import eval_model_acc, eval_model_accuracy_loss, extract_accuracy, extract_ce_loss
+from weak_to_strong.eval import eval_model_accuracy_loss
 from train_simple import main as train_simple_main
 import fire
 
