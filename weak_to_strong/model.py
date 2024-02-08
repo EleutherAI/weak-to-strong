@@ -164,10 +164,6 @@ class TransformerWithHead(PreTrainedModel):
         if not isinstance(update_coef, torch.Tensor):
             update_coef = torch.tensor(update_coef)
         update_coef.to(device=self.device, dtype=self.dtype)
-        print(f"coef requires_grad={update_coef.requires_grad}")
-        print(f"coef device={update_coef.device}")
-        print(f"coef dtype={update_coef.dtype}")
-        print(f"pre-model requires_grad={self.requires_grad}")
         state_dict = torch.load(path)
         state_dict = {
             k.replace("transformer.module", "transformer"): v
@@ -191,17 +187,6 @@ class TransformerWithHead(PreTrainedModel):
                 )
                 del_attr(self, name.split("."))
                 set_attr(self, name.split("."), updated_param)
-                print(
-                    f"Updated {name}: "
-                    f"type={type(updated_param)}, "
-                    f"requires_grad={updated_param.requires_grad}, "
-                    f"device={updated_param.device}, "
-                    f"dtype={updated_param.dtype}, "
-                    f"self.dtype={self.dtype}, "
-                    f"state.dtype={state.dtype}, "
-                    f"orig_param.dtype={orig_param.dtype}, "
-                )
                 updated = True
         if not updated:
             raise ValueError("No parameters updated")
-        print(f"post-model requires_grad={self.requires_grad}")

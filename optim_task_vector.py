@@ -24,14 +24,16 @@ class TaskVectorModule(torch.nn.Module):
 
 def main(
     task_optim: str = "adam",
-    task_lr: float = 1e-4,
-    task_max_steps: int = 100,
+    task_lr: float = 0.1,
+    task_max_steps: int = 50,
     task_max_steps_wo_improvement: int = 5,
-    task_log_every: int = 10,
+    task_log_every: int = 5,
     task_device: str = "cuda",
     task_dtype: str = "float32",
+    task_seed: int = 0,
     **kwargs
 ):
+    torch.manual_seed(task_seed)
     dtype = getattr(torch, task_dtype)
     config = {}
     config.update(kwargs)
