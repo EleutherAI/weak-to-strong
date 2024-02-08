@@ -174,6 +174,20 @@ MODEL_CONFIGS = [
         lora_modules=GPT_NEOX_LORA_MODULES,
     ),
     ModelConfig(
+        name="EleutherAI/pythia-1.4b",
+        default_lr=1e-5,
+        eval_batch_size=32,
+        minibatch_size_per_device=1,  # this needs adjusting for GPU/dataset
+        model_parallel=False,
+        lora_modules=GPT_NEOX_LORA_MODULES,
+        custom_kwargs={
+            "torch_dtype": torch.bfloat16
+            if torch.cuda.is_bf16_supported()
+            else torch.float32  # we can only do this because we're using LoRA
+        },
+        gradient_checkpointing=True,
+    ),
+    ModelConfig(
         name="EleutherAI/pythia-2.8b",
         default_lr=1e-5,
         eval_batch_size=32,
