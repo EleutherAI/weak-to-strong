@@ -69,9 +69,17 @@ def main(
     Returns:
         Ground truth accuracy of the new model
     """
-    coef_best_float = float(coef_best)
+    coef_best_float = (
+        coef_best.item()
+        if isinstance(coef_best, torch.Tensor)
+        else coef_best
+    )
     coef_best_str = f"{coef_best_float:.1f}".replace(".", "_")
-    coef_final_float = float(coef_final)
+    coef_final_float = (
+        coef_final.item()
+        if isinstance(coef_final, torch.Tensor)
+        else coef_final
+    )
     coef_final_str = f"{coef_final_float:.1f}".replace(".", "_")
     # Train weak model on ground truth
     train_simple_main(

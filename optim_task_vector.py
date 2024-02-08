@@ -8,10 +8,13 @@ import fire
 class TaskVectorModule(torch.nn.Module):
     def __init__(self, **kwargs):
         super().__init__()
-        self.coefs = torch.nn.Parameter(torch.zeros(2))
+        self.coefs = torch.nn.Parameter(torch.empty(2))
+        torch.nn.init.normal_(self.coefs, mean=0, std=1)
         self.kwargs = kwargs
 
     def forward(self):
+        assert isinstance(self.coefs[0], torch.Tensor)
+        assert self.coefs[0].requires_grad
         return evaluate_task_vector_main(
             coef_best=self.coefs[0],
             coef_final=self.coefs[1],
@@ -58,6 +61,8 @@ def main(
         device=task_device, dtype=dtype
     )
     assert module.coefs.requires_grad
+    print(f"coefs dtype: {module.coefs.dtype}")
+    print(f"coefs device: {module.coefs.device}")
     trainable_params = list(module.parameters())
     # create optimizer
     if task_optim.lower() == "adam":
@@ -93,10 +98,9 @@ def main(
             break
         optimizer.zero_grad()
         loss.backward()
-        print(f"loss grad: {loss.grad}")
         assert module.coefs.requires_grad
         assert module.coefs.grad is not None
-        print(f"coef grads: {module.coefs.grad.tolist()}")
+        print(f"coef grads: {module.coefs.grad}")
         optimizer.step()
     print(f"best_loss: {best_loss.item()}")
     print(f"best_coefs: {module.coefs.detach().tolist()}")
