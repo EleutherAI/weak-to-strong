@@ -149,7 +149,7 @@ class TransformerWithHead(PreTrainedModel):
             if param.requires_grad and name in state_dict:
                 state_dict[name].to(device=param.device, dtype=param.dtype)
                 update_coef.to(device=param.device, dtype=param.dtype)
-                assert state_dict[name] != param.data
+                assert (state_dict[name] != param.data).any()
                 param.data = (
                     update_coef * state_dict[name] +
                     (1 - update_coef) * param.data
