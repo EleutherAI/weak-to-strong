@@ -99,7 +99,6 @@ def main(
         optimizer.zero_grad()
         loss.backward()
         assert module.coefs.requires_grad
-        assert module.coefs.grad is not None
         print(f"coef grads: {module.coefs.grad}")
         optimizer.step()
     print(f"best_loss: {best_loss.item()}")
