@@ -116,6 +116,13 @@ MODEL_CONFIGS = [
         default_lr=5e-5,
         eval_batch_size=32,
         lora_modules=GPT2_LORA_MODULES,
+        minibatch_size_per_device=1,
+        custom_kwargs={
+            "torch_dtype": torch.bfloat16
+            if torch.cuda.is_bf16_supported()
+            else torch.float32  # we can only do this because we're using LoRA
+        },
+        gradient_checkpointing=True,
     ),
     ModelConfig(
         name="gpt2-large",
