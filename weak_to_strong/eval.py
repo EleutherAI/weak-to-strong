@@ -145,11 +145,11 @@ def eval_model_accuracy_loss(
             batch_loss = torch.nn.functional.cross_entropy(
                 raw_logits, raw_labels, reduction="mean"
             )
-
-            preds = torch.argmax(raw_logprobs, dim=-1)
-            labels = torch.argmax(raw_labels, dim=-1)
-
-            batch_acc = torch.mean((preds == labels).float())
+            with torch.inference_mode():
+                # Compute accuracy without affecting gradients
+                preds = torch.argmax(raw_logprobs, dim=-1)
+                labels = torch.argmax(raw_labels, dim=-1)
+                batch_acc = torch.mean((preds == labels).float())
             if total_loss is None:
                 total_loss = batch_loss
             else:

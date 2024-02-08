@@ -104,9 +104,10 @@ def main(
         )
     # train
     best_loss = torch.tensor([1.0], device=task_device, dtype=dtype)
+    best_acc = torch.tensor([0.0], device=task_device, dtype=dtype)
     steps_wo_improvement = 0
     for step in range(task_max_steps):
-        loss = module()
+        acc, loss = module()
         assert loss.requires_grad
         if step % task_log_every == 0:
             print(f"step: {step}, loss: {loss.item()}")
@@ -115,9 +116,12 @@ def main(
                 "coef_best": module.coefs[0].item(),
                 "coef_final": module.coefs[1].item(),
                 "step": step,
+                "lr": lr_scheduler.get_last_lr()[0],
+                "accuracy": acc.item(),
             })
         if loss < best_loss:
             best_loss = loss
+            best_acc = acc
             steps_wo_improvement = 0
         else:
             steps_wo_improvement += 1
@@ -130,9 +134,11 @@ def main(
         optimizer.step()
         lr_scheduler.step()
     print(f"best_loss: {best_loss.item()}")
+    print(f"best_accuracy: {best_acc.item()}")
     print(f"best_coefs: {module.coefs.detach().tolist()}")
     wandb.log({
         "best_loss": best_loss.item(),
+        "best_accuracy": best_acc.item(),
         "best_coef_best": module.coefs[0].item(),
         "best_coef_final": module.coefs[1].item(),
     })

@@ -29,7 +29,7 @@ def main(
     store: bool = False,
     verbose: bool = False,
     **kwargs
-) -> torch.Tensor:
+) -> tuple[torch.Tensor, torch.Tensor]:
     """Evaluate the task vector arithmetic on ground truth labels.
     Uses arithmetic
         w_base +
@@ -165,7 +165,7 @@ def main(
         res_dict[key] = test_acc.item()
         with open(os.path.join(save_path, "results_summary.json"), "w") as f:
             json.dump(res_dict, f, indent=2)
-    return test_loss
+    return test_acc, test_loss
 
 
 if __name__ == "__main__":
