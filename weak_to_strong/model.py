@@ -151,8 +151,7 @@ class TransformerWithHead(PreTrainedModel):
         # directly update model state using update_coef
         updated = False
         for name, param in self.named_parameters():
-            is_lora = any([lora in name for lora in self.lora_modules])
-            if is_lora and name in state_dict:
+            if "lora" in name and name in state_dict:
                 state_dict[name].to(device=param.device, dtype=param.dtype)
                 update_coef.to(device=param.device, dtype=param.dtype)
                 state_dict[name].requires_grad_(False)
