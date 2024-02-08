@@ -133,6 +133,8 @@ class TransformerWithHead(PreTrainedModel):
         return logits
 
     def update_state(self, path: str, update_coef: float | torch.Tensor = 1.0):
+        if not isinstance(update_coef, torch.Tensor):
+            update_coef = torch.tensor(update_coef)
         state_dict = torch.load(path)
         state_dict = {
             k.replace("transformer.module", "transformer"): v
@@ -143,9 +145,8 @@ class TransformerWithHead(PreTrainedModel):
         updated = False
         for name, param in self.named_parameters():
             if param.requires_grad and name in state_dict:
-                state_dict[name].to(
-                    device=param.device, dtype=param.dtype
-                )
+                state_dict[name].to(device=param.device, dtype=param.dtype)
+                update_coef.to(device=param.device, dtype=param.dtype)
                 param.data = (
                     update_coef * state_dict[name] +
                     (1 - update_coef) * param.data

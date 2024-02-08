@@ -26,8 +26,10 @@ def main(
     task_max_steps_wo_improvement: int = 5,
     task_log_every: int = 10,
     task_device: str = "cuda",
+    task_dtype: str = "float32",
     **kwargs
 ):
+    dtype = getattr(torch, task_dtype)
     config = {}
     config.update(kwargs)
     config.update({
@@ -39,9 +41,9 @@ def main(
         "task_device": task_device,
     })
     wandb_name = (
-        f"{kwargs.get('model_size', 'default').split('/')[-1]}_"
-        f"{kwargs.get('ds_name', 'default')}_"
-        f"{kwargs.get('loss', 'default')}"
+        f"model_{kwargs.get('model_size', 'default').split('/')[-1]}_"
+        f"ds_{kwargs.get('ds_name', 'default')}_"
+        f"task_optim_{task_optim}"
     )
     wandb.init(
         project="weak-to-strong",
@@ -52,7 +54,9 @@ def main(
         dir=kwargs.get("results_folder", "/tmp/results"),
         reinit=True,
     )
-    module = TaskVectorModule(**kwargs).to(task_device)
+    module = TaskVectorModule(**kwargs).to(
+        device=task_device, dtype=dtype
+    )
     assert module.coefs.requires_grad
     trainable_params = list(module.parameters())
     # create optimizer
@@ -67,7 +71,7 @@ def main(
             f"invalid optimizer {task_optim}, must be adam or adafactor"
         )
     # train
-    best_loss = torch.tensor([1.0], device=task_device)
+    best_loss = torch.tensor([1.0], device=task_device, dtype=dtype)
     steps_wo_improvement = 0
     for step in range(task_max_steps):
         loss = module()
@@ -89,6 +93,8 @@ def main(
             break
         optimizer.zero_grad()
         loss.backward()
+        assert module.coefs.grad is not None
+        print(f"grads: {module.coefs.grad.tolist()}")
         optimizer.step()
     print(f"best_loss: {best_loss.item()}")
     print(f"best_coefs: {module.coefs.detach().tolist()}")

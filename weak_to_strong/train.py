@@ -107,7 +107,7 @@ def train_model(
     # we use GPU 0 as the output device. This sadly means that this device will store
     # a bit more data than other ones, but hopefully should not be too big of a deal.
     io_device = model.device if hasattr(model, "device") else 0
-
+    best_eval_results = None
     for epoch in range(epochs):
         for start in range(0, len(ds), batch_size):
             loss_tot = 0
@@ -192,14 +192,17 @@ def train_model(
                     model.train()
                 eval_acc = extract_accuracy(eval_results)
                 eval_acc_dict[step] = eval_acc
-                if eval_acc > max_acc and save_path:
-                    save(
-                        model,
-                        save_path,
-                        "best_model",
-                        optimizer,
-                        lr_scheduler
-                    )
+                if eval_acc > max_acc:
+                    best_eval_results = eval_results
+                    if save_path:
+                        save(
+                            model,
+                            save_path,
+                            "best_model",
+                            optimizer,
+                            lr_scheduler
+                        )
+                    
                 max_acc = max(max_acc, eval_acc)
                 logger.logkv("eval_accuracy", eval_acc)
                 wandb.log({"eval/accuracy": eval_acc})
@@ -218,7 +221,7 @@ def train_model(
         logger.dumpkvs()
     if save_path:
         save(model, save_path, "final_model", optimizer, lr_scheduler)
-    return final_eval_results
+    return best_eval_results, final_eval_results
 
 
 def train_and_save_model(
@@ -283,10 +286,11 @@ def train_and_save_model(
     already_trained = maybe_load_model(model)
 
     if already_trained:
-        test_results = eval_model_acc(model, test_ds, eval_batch_size)
+        best_test_results = None
+        final_test_results = eval_model_acc(model, test_ds, eval_batch_size)
     else:
         start = time.time()
-        test_results = train_model(
+        best_test_results, final_test_results = train_model(
             model,
             train_ds,
             batch_size,
@@ -318,7 +322,7 @@ def train_and_save_model(
             pickle.dump(
                 {
                     "avg_acc_test": float(
-                        np.mean([r["acc"] for r in test_results])  # type: ignore
+                        np.mean([r["acc"] for r in final_test_results])  # type: ignore
                     ),
                     "avg_acc_inference": float(
                         np.mean(
@@ -327,7 +331,7 @@ def train_and_save_model(
                             else [np.nan]
                         )
                     ),
-                    "test_results": test_results,
+                    "test_results": final_test_results,
                     "inference_results": inference_results if inference_results else [],
                 },
                 f,
@@ -337,4 +341,4 @@ def train_and_save_model(
     logger.shutdown()
     wandb.finish()
 
-    return test_results, inference_results
+    return best_test_results, final_test_results, inference_results

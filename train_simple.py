@@ -210,7 +210,7 @@ def main(
 
     loss_fn = loss_dict[loss]
     print(f"Training model {model_size}")
-    test_results, weak_ds = train_and_save_model(
+    best_test_results, final_best_test_results, weak_ds = train_and_save_model(
         model_config,
         train1_ds,  # this has weak labels iff weak_labels_path is not None
         test_ds,  # this has ground truth labels no matter what
@@ -234,9 +234,12 @@ def main(
     if weak_ds is not None:
         weak_ds.save_to_disk(save_path + "/" + "weak_labels")
 
-    acc = np.mean([x["acc"] for x in test_results])  # type: ignore
-    res_dict = {"accuracy": acc}
-    print("accuracy:", acc)
+    final_acc = np.mean([x["acc"] for x in final_test_results])  # type: ignore
+    res_dict = {"final_accuracy": final_acc}
+    if best_test_results is not None:
+        best_acc = np.mean([x["acc"] for x in best_test_results])  # type: ignore
+        res_dict["best_accuracy"] = best_acc
+    print("accuracy:", final_acc)
 
     with open(os.path.join(save_path, "config.json"), "w") as f:
         json.dump(config, f, indent=2)
