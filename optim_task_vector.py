@@ -32,7 +32,7 @@ def main(
     task_device: str = "cuda",
     task_dtype: str = "float32",
     task_seed: int = 0,
-    task_lr_schedule: str = "cosine_anneal",
+    task_lr_schedule: str = "linear",
     **kwargs
 ):
     torch.manual_seed(task_seed)
@@ -94,9 +94,15 @@ def main(
         lr_scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(
             optimizer, task_max_steps
         )
+    elif task_lr_schedule == "linear":
+        lr_scheduler = get_linear_schedule_with_warmup(
+            optimizer, num_warmup_steps=0, num_training_steps=task_max_steps
+        )
     elif task_lr_schedule == "linear_with_warmup":
         lr_scheduler = get_linear_schedule_with_warmup(
-            optimizer, num_warmup_steps=50, num_training_steps=task_max_steps
+            optimizer,
+            num_warmup_steps=int(0.1 * task_max_steps),
+            num_training_steps=task_max_steps,
         )
     else:
         lr_scheduler = torch.optim.lr_scheduler.LambdaLR(

@@ -223,7 +223,8 @@ MODEL_CONFIGS = [
     ModelConfig(
         name="Qwen/Qwen-1_8B",
         default_lr=1e-5,
-        eval_batch_size=2,
+        eval_batch_size=32,
+        minibatch_size_per_device=1,
         gradient_checkpointing=True,
         model_parallel=(per_device_ram < 35e9 and torch.cuda.device_count() > 1),
         custom_kwargs={
