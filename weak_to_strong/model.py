@@ -161,6 +161,7 @@ class TransformerWithHead(PreTrainedModel):
                     update_coef * state_dict[name] +
                     (1 - update_coef) * param.data
                 )
+                print(f"Updated {name}, requires_grad={param.requires_grad}")
                 updated = True
         if not updated:
             raise ValueError("No parameters updated")
