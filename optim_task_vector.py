@@ -46,6 +46,9 @@ def main(
         "task_max_steps_wo_improvement": task_max_steps_wo_improvement,
         "task_log_every": task_log_every,
         "task_device": task_device,
+        "task_dtype": task_dtype,
+        "task_seed": task_seed,
+        "task_lr_schedule": task_lr_schedule,
     })
     wandb_name = (
         f"model_{kwargs.get('model_size', 'default').split('/')[-1]}_"
@@ -87,8 +90,8 @@ def main(
             return 1
         else:
             assert False, (
-                f"invalid lr schedule, {task_lr_schedule}, "
-                "must be constant or cosine_anneal"
+                f"invalid lr_schedule={task_lr_schedule}, "
+                "must be constant, linear or cosine_anneal"
             )
     if task_lr_schedule == "cosine_anneal":
         lr_scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(
