@@ -191,7 +191,9 @@ class TransformerWithHead(PreTrainedModel):
                 print(
                     f"Updated {name}: "
                     f"type={type(updated_param)}, "
-                    f"requires_grad={updated_param.requires_grad}"
+                    f"requires_grad={updated_param.requires_grad}, "
+                    f"device={updated_param.device}, "
+                    f"dtype={updated_param.dtype}"
                 )
                 updated = True
         if not updated:
