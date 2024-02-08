@@ -142,6 +142,7 @@ class TransformerWithHead(PreTrainedModel):
         if not isinstance(update_coef, torch.Tensor):
             update_coef = torch.tensor(update_coef)
         print(f"coef requires_grad={update_coef.requires_grad}")
+        print(f"pre-model requires_grad={self.requires_grad}")
         state_dict = torch.load(path)
         state_dict = {
             k.replace("transformer.module", "transformer"): v
@@ -151,16 +152,23 @@ class TransformerWithHead(PreTrainedModel):
         # directly update model state using update_coef
         updated = False
         for name, param in self.named_parameters():
-            if "lora" in name and name in state_dict:
+            is_trainable = "lora" in name or "score" in name
+            if is_trainable and name in state_dict:
                 state_dict[name].to(device=param.device, dtype=param.dtype)
                 update_coef.to(device=param.device, dtype=param.dtype)
                 state_dict[name].requires_grad_(False)
                 assert (state_dict[name] != param.data).any()
-                param.data = (
+                updated_weight = (
                     update_coef * state_dict[name] +
                     (1 - update_coef) * param.data
                 )
-                print(f"Updated {name}, requires_grad={param.requires_grad}")
+                param.data.copy_(updated_weight)
+                print(
+                    f"Updated {name}, "
+                    f"updated_weight.requires_grad={updated_weight.requires_grad}, "
+                    f"param.requires_grad={param.requires_grad}, "
+                )
                 updated = True
         if not updated:
             raise ValueError("No parameters updated")
+        print(f"post-model requires_grad={self.requires_grad}")

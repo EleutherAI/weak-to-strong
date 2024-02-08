@@ -144,16 +144,13 @@ def main(
     if verbose:
         print("Updating model weights")
         print(f"coef_best={coef_best_float}, best_path={best_path}")
-        print(f"model requires_grad={model.requires_grad}")
     model.update_state(best_path, coef_best)
     if verbose:
         print(f"coef_final={coef_final_float}, final_path={final_path}")
-        print(f"model requires_grad={model.requires_grad}")
     model.update_state(final_path, coef_final)
 
     if verbose:
         print("Evaluating model")
-        print(f"requires_grad={model.requires_grad}")
     test_acc, test_loss = eval_model_accuracy_loss(
         model,
         test_ds,
