@@ -72,6 +72,10 @@ class TransformerWithHead(PreTrainedModel):
                 self.lm.base_model.base_model
             )  # PeftModel -> LoraModel -> PreTrainedModel
         return self.lm.base_model  # CausalLM -> PreTrainedModel
+    
+    @property
+    def requires_grad(self):
+        return any([p.requires_grad for p in self.parameters()])
 
     @classmethod
     def from_pretrained(cls, name, **kwargs):
@@ -133,10 +137,11 @@ class TransformerWithHead(PreTrainedModel):
         return logits
 
     def update_state(self, path: str, update_coef: float | torch.Tensor = 1.0):
+        assert self.lora_modules is not None
         print(f"update_coef={update_coef}")
         if not isinstance(update_coef, torch.Tensor):
             update_coef = torch.tensor(update_coef)
-        print(f"requires_grad={update_coef.requires_grad}")
+        print(f"coef requires_grad={update_coef.requires_grad}")
         state_dict = torch.load(path)
         state_dict = {
             k.replace("transformer.module", "transformer"): v
@@ -146,9 +151,11 @@ class TransformerWithHead(PreTrainedModel):
         # directly update model state using update_coef
         updated = False
         for name, param in self.named_parameters():
-            if param.requires_grad and name in state_dict:
+            is_lora = any([lora in name for lora in self.lora_modules])
+            if is_lora and name in state_dict:
                 state_dict[name].to(device=param.device, dtype=param.dtype)
                 update_coef.to(device=param.device, dtype=param.dtype)
+                state_dict[name].requires_grad_(False)
                 assert (state_dict[name] != param.data).any()
                 param.data = (
                     update_coef * state_dict[name] +
