@@ -178,9 +178,12 @@ class TransformerWithHead(PreTrainedModel):
         updated = False
         for name, state in state_dict.items():
             if "lora" in name or "score" in name:
-                state.to(device=self.device, dtype=self.dtype)
+                state = state.to(device=self.device, dtype=self.dtype)
                 state.requires_grad_(False)
                 orig_param = get_attr(self, name.split("."))
+                orig_param = orig_param.to(
+                    device=self.device, dtype=self.dtype
+                )
                 assert (state != orig_param).any()
                 updated_param = (
                     update_coef * state +
