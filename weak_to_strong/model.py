@@ -60,6 +60,9 @@ class TransformerWithHead(PreTrainedModel):
                 lm_head.weight.dtype
             )
             torch.nn.init.normal_(self.score.weight, std=0.0)
+            print("Initialized linear head to zeros")
+            print(f"lm_head.weight.dtype={lm_head.weight.dtype}")
+            print(f"score.weight.dtype={self.score.weight.dtype}")
         self.linear_probe = linear_probe
 
     @property

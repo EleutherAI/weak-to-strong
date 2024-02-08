@@ -114,7 +114,7 @@ def eval_model_accuracy_loss(
     ce_loss (torch.Tensor): The cross-entropy loss of the model on the
         given dataset.
     """
-    clear_mem(verbose=True)
+    clear_mem()
     model.eval()
     io_device = model.device if hasattr(model, "device") else 0
     print("Evaluating model accuracy and loss")
