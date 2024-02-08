@@ -136,6 +136,10 @@ def main(
         use_lm_head=use_lm_head,
         linear_probe=linear_probe,
     )
+    print("Parameters requiring grad before disable:")
+    for name, param in model.named_parameters():
+        if param.requires_grad:
+            print(name)
     model.requires_grad_(False)  # training complete
     if verbose:
         print("Updating model weights")
