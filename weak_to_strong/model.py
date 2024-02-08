@@ -123,6 +123,13 @@ class TransformerWithHead(PreTrainedModel):
                     for i in range(len(input_lens))
                 ]
             )
+            assert hidden_states.dtype == self.score.weight.dtype, (
+                f"hidden_states.dtype={hidden_states.dtype}, "
+                f"score.weight.dtype={self.score.weight.dtype}, "
+                f"input_ids.dtype={input_ids.dtype}, "
+                f"hidden_states.device={hidden_states.device}, "
+                f"score.weight.device={self.score.weight.device}"
+            )
             self.score.to(hidden_states.device)
             if self.linear_probe:
                 hidden_states = hidden_states.detach()
