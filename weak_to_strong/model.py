@@ -142,9 +142,10 @@ class TransformerWithHead(PreTrainedModel):
         # directly update model state using update_coef
         updated = False
         for name, param in self.named_parameters():
-            if not param.requires_grad:
-                continue
-            if name in state_dict:
+            if param.requires_grad and name in state_dict:
+                state_dict[name].to(
+                    device=param.device, dtype=param.dtype
+                )
                 param.data = (
                     update_coef * state_dict[name] +
                     (1 - update_coef) * param.data
