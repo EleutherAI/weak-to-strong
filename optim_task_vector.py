@@ -1,5 +1,6 @@
 import torch
 import torch_optimizer as toptim
+from transformers import get_linear_schedule_with_warmup
 import wandb
 from evaluate_task_vector import main as evaluate_task_vector_main
 import fire
@@ -24,13 +25,14 @@ class TaskVectorModule(torch.nn.Module):
 
 def main(
     task_optim: str = "adam",
-    task_lr: float = 0.1,
-    task_max_steps: int = 50,
+    task_lr: float = 0.5,
+    task_max_steps: int = 20,
     task_max_steps_wo_improvement: int = 5,
     task_log_every: int = 5,
     task_device: str = "cuda",
     task_dtype: str = "float32",
     task_seed: int = 0,
+    task_lr_schedule: str = "cosine_anneal",
     **kwargs
 ):
     torch.manual_seed(task_seed)
@@ -78,6 +80,28 @@ def main(
         assert False, (
             f"invalid optimizer {task_optim}, must be adam or adafactor"
         )
+
+    # scheduler
+    def lr_schedule_fn(step):
+        if task_lr_schedule == "constant":
+            return 1
+        else:
+            assert False, (
+                f"invalid lr schedule, {task_lr_schedule}, "
+                "must be constant or cosine_anneal"
+            )
+    if task_lr_schedule == "cosine_anneal":
+        lr_scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(
+            optimizer, task_max_steps
+        )
+    elif task_lr_schedule == "linear_with_warmup":
+        lr_scheduler = get_linear_schedule_with_warmup(
+            optimizer, num_warmup_steps=50, num_training_steps=task_max_steps
+        )
+    else:
+        lr_scheduler = torch.optim.lr_scheduler.LambdaLR(
+            optimizer, lr_schedule_fn
+        )
     # train
     best_loss = torch.tensor([1.0], device=task_device, dtype=dtype)
     steps_wo_improvement = 0
@@ -104,6 +128,7 @@ def main(
         assert module.coefs.requires_grad
         print(f"coef grads: {module.coefs.grad}")
         optimizer.step()
+        lr_scheduler.step()
     print(f"best_loss: {best_loss.item()}")
     print(f"best_coefs: {module.coefs.detach().tolist()}")
     wandb.log({
