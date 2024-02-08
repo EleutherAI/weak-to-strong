@@ -193,7 +193,10 @@ class TransformerWithHead(PreTrainedModel):
                     f"type={type(updated_param)}, "
                     f"requires_grad={updated_param.requires_grad}, "
                     f"device={updated_param.device}, "
-                    f"dtype={updated_param.dtype}"
+                    f"dtype={updated_param.dtype}, "
+                    f"self.dtype={self.dtype}, "
+                    f"state.dtype={state.dtype}, "
+                    f"orig_param.dtype={orig_param.dtype}, "
                 )
                 updated = True
         if not updated:
