@@ -64,6 +64,7 @@ def main(
     print(f"coefs dtype: {module.coefs.dtype}")
     print(f"coefs device: {module.coefs.device}")
     trainable_params = list(module.parameters())
+    print(f"trainable_params: {trainable_params}")
     # create optimizer
     if task_optim.lower() == "adam":
         optimizer = torch.optim.Adam(

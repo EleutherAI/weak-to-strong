@@ -141,7 +141,10 @@ class TransformerWithHead(PreTrainedModel):
         print(f"update_coef={update_coef}")
         if not isinstance(update_coef, torch.Tensor):
             update_coef = torch.tensor(update_coef)
+        update_coef.to(device=self.device, dtype=self.dtype)
         print(f"coef requires_grad={update_coef.requires_grad}")
+        print(f"coef device={update_coef.device}")
+        print(f"coef dtype={update_coef.dtype}")
         print(f"pre-model requires_grad={self.requires_grad}")
         state_dict = torch.load(path)
         state_dict = {
@@ -151,23 +154,22 @@ class TransformerWithHead(PreTrainedModel):
 
         # directly update model state using update_coef
         updated = False
-        for name, param in self.named_parameters():
-            is_trainable = "lora" in name or "score" in name
-            if is_trainable and name in state_dict:
-                state_dict[name].to(device=param.device, dtype=param.dtype)
-                update_coef.to(device=param.device, dtype=param.dtype)
-                state_dict[name].requires_grad_(False)
-                assert (state_dict[name] != param.data).any()
-                updated_weight = (
-                    update_coef * state_dict[name] +
-                    (1 - update_coef) * param.data
+        for name, state in state_dict.items():
+            if "lora" in name or "score" in name:
+                state.to(device=self.device, dtype=self.dtype)
+                state.requires_grad_(False)
+                orig_param = getattr(self, name)
+                assert (state != orig_param).any()
+                updated_param = (
+                    update_coef * state +
+                    (1 - update_coef) * orig_param
                 )
-                self._parameters[name] = torch.nn.Parameter(updated_weight)
+                delattr(self, name)
+                setattr(self, name, updated_param)
                 print(
-                    f"Updated {name}, "
-                    f"updated_weight.type={type(updated_weight)}, "
-                    f"updated_weight.requires_grad={updated_weight.requires_grad}, "
-                    f"param.requires_grad={self._parameters[name].requires_grad}, "
+                    f"Updated {name}: "
+                    f"type={type(updated_param)}, "
+                    f"requires_grad={updated_param.requires_grad}"
                 )
                 updated = True
         if not updated:
