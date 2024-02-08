@@ -162,11 +162,12 @@ class TransformerWithHead(PreTrainedModel):
                     update_coef * state_dict[name] +
                     (1 - update_coef) * param.data
                 )
-                param.data.copy_(updated_weight)
+                self._parameters[name] = torch.nn.Parameter(updated_weight)
                 print(
                     f"Updated {name}, "
+                    f"updated_weight.type={type(updated_weight)}, "
                     f"updated_weight.requires_grad={updated_weight.requires_grad}, "
-                    f"param.requires_grad={param.requires_grad}, "
+                    f"param.requires_grad={self._parameters[name].requires_grad}, "
                 )
                 updated = True
         if not updated:
