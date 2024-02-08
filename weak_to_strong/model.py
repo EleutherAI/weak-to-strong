@@ -5,6 +5,28 @@ from peft import get_peft_model, LoraConfig, TaskType, PeftType  # type: ignore
 from typing import Optional
 
 
+# Recursive attribute access
+def del_attr(obj, names):
+    if len(names) == 1:
+        delattr(obj, names[0])
+    else:
+        del_attr(getattr(obj, names[0]), names[1:])
+
+
+def set_attr(obj, names, val):
+    if len(names) == 1:
+        setattr(obj, names[0], val)
+    else:
+        set_attr(getattr(obj, names[0]), names[1:], val)
+
+
+def get_attr(obj, names):
+    if len(names) == 1:
+        return getattr(obj, names[0])
+    else:
+        return get_attr(getattr(obj, names[0]), names[1:])
+
+
 @dataclass
 class HeadOutput:
     logits: torch.FloatTensor
@@ -158,14 +180,14 @@ class TransformerWithHead(PreTrainedModel):
             if "lora" in name or "score" in name:
                 state.to(device=self.device, dtype=self.dtype)
                 state.requires_grad_(False)
-                orig_param = getattr(self, name)
+                orig_param = get_attr(self, name.split("."))
                 assert (state != orig_param).any()
                 updated_param = (
                     update_coef * state +
                     (1 - update_coef) * orig_param
                 )
-                delattr(self, name)
-                setattr(self, name, updated_param)
+                del_attr(self, name.split("."))
+                set_attr(self, name.split("."), updated_param)
                 print(
                     f"Updated {name}: "
                     f"type={type(updated_param)}, "
