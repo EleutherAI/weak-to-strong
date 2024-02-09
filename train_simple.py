@@ -50,6 +50,7 @@ def main(
     # If you pass neither, we will train on ground truth.
     weak_model_size: Optional[str] = None,
     weak_labels_path: Optional[str] = None,
+    weak_lr: Optional[float] = None,
     # The subfolder in results_folder to save the results to
     sweep_subfolder: str = "default",
     # Set to a very large value so that by default we don't do any intermediate evals but
@@ -79,7 +80,6 @@ def main(
     if minibatch_size_per_device is None:
         minibatch_size_per_device = model_config.minibatch_size_per_device or 1
 
-    use_default_lr = False
     if lr is None:
         assert batch_size == 32, (
             "Learning rates were tuned on batch size 32, you probably want to sweep LR "
@@ -90,7 +90,6 @@ def main(
             if is_w2s
             else model_config.default_gt_lr
         )
-        use_default_lr = True
 
     if optim is None:
         optim = model_config.default_optimizer
@@ -128,8 +127,12 @@ def main(
         del weak_model_config["w2s_epochs"]
         del weak_model_config["strong_eval_every"]
         weak_model_config["gt_epochs"] = gt_epochs
-        if use_default_lr:
-            weak_model_config["lr"] = MODELS_DICT[weak_model_size].default_lr
+        if weak_lr is None:
+            weak_model_config["lr"] = (
+                MODELS_DICT[weak_model_size].default_gt_lr
+            )
+        else:
+            weak_model_config["lr"] = weak_lr
 
         weak_model_config_name = get_config_foldername(weak_model_config)
 

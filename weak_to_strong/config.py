@@ -60,9 +60,9 @@ QWEN1_5_KWARGS = {
     "torch_dtype": torch.bfloat16 if torch.cuda.is_bf16_supported() else torch.float32,
 }
 DEFAULT_GT_LR = 1e-5
-DEFAULT_W2S_LR = 1e-3
+DEFAULT_W2S_LR = 5e-5
 OPT_GT_LR = 1e-3
-OPT_W2S_LR = 1e-1
+OPT_W2S_LR = 5e-3
 SMALL_BATCH_SIZE = 2
 MEDIUM_BATCH_SIZE = 16
 LARGE_BATCH_SIZE = 32
@@ -73,14 +73,14 @@ MODEL_CONFIGS = [
     ModelConfig(
         name="gpt2",
         default_gt_lr=5e-5,
-        default_w2s_lr=5e-3,
+        default_w2s_lr=1e-4,
         eval_batch_size=LARGE_BATCH_SIZE,
         lora_modules=GPT2_LORA_MODULES,
     ),
     ModelConfig(
         name="gpt2-medium",
         default_gt_lr=5e-5,
-        default_w2s_lr=5e-3,
+        default_w2s_lr=1e-4,
         eval_batch_size=LARGE_BATCH_SIZE,
         lora_modules=GPT2_LORA_MODULES,
     ),
