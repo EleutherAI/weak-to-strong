@@ -73,10 +73,6 @@ def main(
     Returns:
         Ground truth accuracy of the new model
     """
-    if isinstance(coef_best, int) or force_init or abs(1 - coef_best)< 1e-6:
-        print(f"Force init: {force_init}")
-        print(f"wandb.run: {wandb.run}")
-        print(f"wandb.config: {wandb.config}")
     if force_init or coef_best is None or coef_final is None:
         # Called from wandb.sweep
         config = {}
@@ -103,6 +99,7 @@ def main(
             f"ds_{ds_name}_"
             f"evaluate_task_vector"
         )
+        print(f"Setting config: {config}")
         wandb.init(
             config=config,
             group=kwargs.get("sweep_subfolder", "default"),
@@ -119,7 +116,7 @@ def main(
             wandb.config.update({
                 "coef_best": coef_best,
                 "coef_final": coef_final,
-            })
+            }, allow_val_change=True)
     assert coef_best is not None
     assert coef_final is not None
     coef_best_float = (
