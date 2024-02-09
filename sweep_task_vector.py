@@ -1,10 +1,9 @@
-#%%
 import torch
 import wandb
 from evaluate_task_vector import main as evaluate_task_vector_main
 import fire
 
-#%%
+
 def main(
     coef_step: float = 0.1,
     coef_min: float = -5.0,

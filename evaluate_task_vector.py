@@ -91,8 +91,9 @@ def main(
             "verbose": verbose,
         })
         wandb_name = (
-            f"model_{kwargs.get('model_size', 'default').split('/')[-1]}_"
-            f"ds_{kwargs.get('ds_name', 'default')}_"
+            f"model_{model_size.split('/')[-1]}_"
+            f"weak_{weak_model_size}_"
+            f"ds_{ds_name}_"
             f"evaluate_task_vector"
         )
         wandb.init(
@@ -203,7 +204,7 @@ def main(
         res_dict[key] = test_acc.item()
         with open(os.path.join(save_path, "results_summary.json"), "w") as f:
             json.dump(res_dict, f, indent=2)
-    if wandb.run is not None:
+    if wandb.config.get("coef_best") is not None:
         wandb.log({"task_vector/accuracy": test_acc.item()})
     return test_acc, test_loss
 
