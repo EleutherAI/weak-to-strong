@@ -4,6 +4,7 @@ from transformers import get_linear_schedule_with_warmup
 import wandb
 from evaluate_task_vector import main as evaluate_task_vector_main
 import fire
+from weak_to_strong.common import wandb_finish
 
 
 class TaskVectorModule(torch.nn.Module):
@@ -151,7 +152,7 @@ def main(
         "best_coef_best": module.coefs[0].item(),
         "best_coef_final": module.coefs[1].item(),
     })
-    wandb.finish()
+    wandb_finish()
 
 
 if __name__ == "__main__":

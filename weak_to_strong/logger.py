@@ -5,6 +5,8 @@ from typing import Optional
 
 import wandb
 
+from weak_to_strong.common import wandb_finish
+
 
 def append_to_jsonl(path: str, data: dict):
     with open(path, "a") as f:
@@ -53,7 +55,7 @@ class WandbLogger(object):
 
     def shutdown(self):
         if self.use_wandb:
-            wandb.finish()
+            wandb_finish()
 
 
 def is_configured():

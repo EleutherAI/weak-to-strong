@@ -204,7 +204,7 @@ def main(
         res_dict[key] = test_acc.item()
         with open(os.path.join(save_path, "results_summary.json"), "w") as f:
             json.dump(res_dict, f, indent=2)
-    if wandb.config.get("coef_best") is not None:
+    if wandb.run and wandb.config.get("coef_best") is not None:
         wandb.log({"task_vector/accuracy": test_acc.item()})
     return test_acc, test_loss
 

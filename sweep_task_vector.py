@@ -3,6 +3,8 @@ import wandb
 from evaluate_task_vector import main as evaluate_task_vector_main
 import fire
 
+from weak_to_strong.common import wandb_finish
+
 
 def main(
     coef_step: float = 0.1,
@@ -39,7 +41,7 @@ def main(
         lambda: evaluate_task_vector_main(**kwargs),
         count=sweep_steps,
     )
-    wandb.finish()
+    wandb_finish(sweep=True)
 
 
 if __name__ == "__main__":

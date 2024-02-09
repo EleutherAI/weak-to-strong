@@ -13,7 +13,7 @@ from transformers import get_linear_schedule_with_warmup
 import wandb
 
 import weak_to_strong.logger as logger
-from weak_to_strong.common import clear_mem, to_batch
+from weak_to_strong.common import clear_mem, to_batch, wandb_finish
 from weak_to_strong.eval import eval_model_acc, extract_accuracy
 from weak_to_strong.loss import kl_loss
 from weak_to_strong.config import ModelConfig
@@ -339,6 +339,6 @@ def train_and_save_model(
     # try to clean up memory
     clear_mem()
     logger.shutdown()
-    wandb.finish()
+    wandb_finish()
 
     return best_test_results, final_test_results, inference_results
