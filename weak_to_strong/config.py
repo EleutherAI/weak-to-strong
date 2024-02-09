@@ -60,9 +60,9 @@ QWEN1_5_KWARGS = {
     "torch_dtype": torch.bfloat16 if torch.cuda.is_bf16_supported() else torch.float32,
 }
 DEFAULT_GT_LR = 1e-5
-DEFAULT_W2S_LR = 5e-5
+DEFAULT_W2S_LR = 2e-5
 OPT_GT_LR = 1e-3
-OPT_W2S_LR = 5e-3
+OPT_W2S_LR = 2e-3
 SMALL_BATCH_SIZE = 2
 MEDIUM_BATCH_SIZE = 16
 LARGE_BATCH_SIZE = 32
