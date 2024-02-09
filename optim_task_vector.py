@@ -62,7 +62,7 @@ def main(
         group=kwargs.get("sweep_subfolder", "default"),
         job_type="task_vector",
         name=wandb_name,
-        dir=kwargs.get("results_folder", "/tmp/results"),
+        dir=kwargs.get("results_folder", "./results"),
         reinit=True,
     )
     module = TaskVectorModule(**kwargs).to(

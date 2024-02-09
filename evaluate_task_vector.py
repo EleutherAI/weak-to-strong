@@ -29,6 +29,7 @@ def main(
     linear_probe: bool = False,
     store: bool = False,
     verbose: bool = False,
+    force_init: bool = False,
     **kwargs
 ) -> tuple[torch.Tensor, torch.Tensor]:
     """Evaluate the task vector arithmetic on ground truth labels.
@@ -65,12 +66,14 @@ def main(
             Whether to store the results.
         verbose: bool
             Whether to print verbose output.
+        force_init: bool
+            Whether to force wandb initialization.
         **kwargs: dict
             Other arguments to pass to train_simple_main.
     Returns:
         Ground truth accuracy of the new model
     """
-    if coef_best is None or coef_final is None:
+    if force_init or coef_best is None or coef_final is None:
         # Called from wandb.sweep
         config = {}
         config.update(kwargs)
@@ -101,11 +104,17 @@ def main(
             group=kwargs.get("sweep_subfolder", "default"),
             job_type="task_vector",
             name=wandb_name,
-            dir=kwargs.get("results_folder", "/tmp/results"),
+            dir=kwargs.get("results_folder", "./results"),
             reinit=True,
         )
-        coef_best = wandb.config.coef_best
-        coef_final = wandb.config.coef_final
+        if coef_best is None or coef_final is None:
+            coef_best = wandb.config.coef_best
+            coef_final = wandb.config.coef_final
+        else:
+            wandb.config.update({
+                "coef_best": coef_best,
+                "coef_final": coef_final,
+            })
     assert coef_best is not None
     assert coef_final is not None
     coef_best_float = (

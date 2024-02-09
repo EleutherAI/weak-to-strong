@@ -1,3 +1,4 @@
+from datetime import datetime
 import torch
 import wandb
 from evaluate_task_vector import main as evaluate_task_vector_main
@@ -11,7 +12,7 @@ def main(
     coef_min: float = -5.0,
     coef_max: float = 5.0,
     sweep_method: str = "bayes",
-    sweep_steps: int = 10,
+    sweep_steps: int = 1,
     task_seed: int = 0,
     **kwargs
 ):
@@ -19,11 +20,7 @@ def main(
     wandb_name = (
         f"model_{kwargs.get('model_size', 'default').split('/')[-1]}_"
         f"ds_{kwargs.get('ds_name', 'default')}_"
-        f"seed_{task_seed}_"
-        f"coef_step_{coef_step}_"
-        f"coef_min_{coef_min}_"
-        f"coef_max_{coef_max}_"
-        "sweep_task_vector"
+        f"sweep_task_vector_{datetime.now().strftime('%Y-%m-%d_%H-%M-%S')}"
     )
     coef_values = torch.arange(coef_min, coef_max, coef_step).tolist()
     sweep_configuration = {
@@ -36,6 +33,16 @@ def main(
         },
     }
     sweep_id = wandb.sweep(sweep=sweep_configuration, project="weak-to-strong")
+    wandb.agent(
+        sweep_id,
+        lambda: evaluate_task_vector_main(coef_best=1, coef_final=0, **kwargs),
+        count=1,
+    )
+    wandb.agent(
+        sweep_id,
+        lambda: evaluate_task_vector_main(coef_best=0, coef_final=1, **kwargs),
+        count=1,
+    )
     wandb.agent(
         sweep_id,
         lambda: evaluate_task_vector_main(**kwargs),

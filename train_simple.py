@@ -40,7 +40,7 @@ def main(
     # number of examples per forward pass per device
     minibatch_size_per_device: Optional[int] = None,
     train_with_dropout: bool = False,
-    results_folder: str = "/tmp/results",
+    results_folder: str = "./results",
     # if True, keep the transformer weights frozen and only train the head
     linear_probe: bool = False,
     lr_schedule: str = "cosine_anneal",
