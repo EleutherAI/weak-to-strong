@@ -239,7 +239,9 @@ def main(
     if best_test_results is not None:
         best_acc = np.mean([x["acc"] for x in best_test_results])  # type: ignore
         res_dict["best_accuracy"] = best_acc
-    print("accuracy:", final_acc)
+        print("best accuracy:", best_acc)
+    print("final accuracy:", final_acc)
+    wandb.log(res_dict)
 
     with open(os.path.join(save_path, "config.json"), "w") as f:
         json.dump(config, f, indent=2)
