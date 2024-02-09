@@ -8,7 +8,8 @@ from weak_to_strong.loss import logconf_loss_fn, product_loss_fn, xent_loss, kl_
 @dataclass
 class ModelConfig:
     name: str
-    default_lr: float
+    default_gt_lr: float
+    default_w2s_lr: float
     eval_batch_size: int
     minibatch_size_per_device: Optional[int] = None
     lora_modules: Optional[list[str]] = None
@@ -58,8 +59,10 @@ QWEN1_5_KWARGS = {
     "trust_remote_code": True,
     "torch_dtype": torch.bfloat16 if torch.cuda.is_bf16_supported() else torch.float32,
 }
-DEFAULT_DEFAULT_LR = 1e-5
-OPT_DEFAULT_LR = 1e-3
+DEFAULT_GT_LR = 1e-5
+DEFAULT_W2S_LR = 1e-3
+OPT_GT_LR = 1e-3
+OPT_W2S_LR = 1e-1
 SMALL_BATCH_SIZE = 2
 MEDIUM_BATCH_SIZE = 16
 LARGE_BATCH_SIZE = 32
@@ -69,25 +72,29 @@ LARGE_BATCH_SIZE = 32
 MODEL_CONFIGS = [
     ModelConfig(
         name="gpt2",
-        default_lr=5e-5,
+        default_gt_lr=5e-5,
+        default_w2s_lr=5e-3,
         eval_batch_size=LARGE_BATCH_SIZE,
         lora_modules=GPT2_LORA_MODULES,
     ),
     ModelConfig(
         name="gpt2-medium",
-        default_lr=5e-5,
+        default_gt_lr=5e-5,
+        default_w2s_lr=5e-3,
         eval_batch_size=LARGE_BATCH_SIZE,
         lora_modules=GPT2_LORA_MODULES,
     ),
     ModelConfig(
         name="gpt2-large",
-        default_lr=DEFAULT_DEFAULT_LR,
+        default_gt_lr=DEFAULT_GT_LR,
+        default_w2s_lr=DEFAULT_W2S_LR,
         eval_batch_size=LARGE_BATCH_SIZE,
         lora_modules=GPT2_LORA_MODULES,
     ),
     ModelConfig(
         name="gpt2-xl",
-        default_lr=DEFAULT_DEFAULT_LR,
+        default_gt_lr=DEFAULT_GT_LR,
+        default_w2s_lr=DEFAULT_W2S_LR,
         eval_batch_size=LARGE_BATCH_SIZE,
         gradient_checkpointing=True,
         lora_modules=GPT2_LORA_MODULES,
@@ -95,7 +102,8 @@ MODEL_CONFIGS = [
     ),
     ModelConfig(
         name="EleutherAI/pythia-14m",
-        default_lr=DEFAULT_DEFAULT_LR,
+        default_gt_lr=DEFAULT_GT_LR,
+        default_w2s_lr=DEFAULT_W2S_LR,
         eval_batch_size=LARGE_BATCH_SIZE,
         minibatch_size_per_device=LARGE_BATCH_SIZE,
         model_parallel=False,
@@ -103,7 +111,8 @@ MODEL_CONFIGS = [
     ),
     ModelConfig(
         name="EleutherAI/pythia-70m",
-        default_lr=DEFAULT_DEFAULT_LR,
+        default_gt_lr=DEFAULT_GT_LR,
+        default_w2s_lr=DEFAULT_W2S_LR,
         eval_batch_size=LARGE_BATCH_SIZE,
         minibatch_size_per_device=LARGE_BATCH_SIZE,
         model_parallel=False,
@@ -111,7 +120,8 @@ MODEL_CONFIGS = [
     ),
     ModelConfig(
         name="EleutherAI/pythia-160m",
-        default_lr=DEFAULT_DEFAULT_LR,
+        default_gt_lr=DEFAULT_GT_LR,
+        default_w2s_lr=DEFAULT_W2S_LR,
         eval_batch_size=LARGE_BATCH_SIZE,
         minibatch_size_per_device=LARGE_BATCH_SIZE,
         model_parallel=False,
@@ -119,7 +129,8 @@ MODEL_CONFIGS = [
     ),
     ModelConfig(
         name="EleutherAI/pythia-410m",
-        default_lr=DEFAULT_DEFAULT_LR,
+        default_gt_lr=DEFAULT_GT_LR,
+        default_w2s_lr=DEFAULT_W2S_LR,
         eval_batch_size=LARGE_BATCH_SIZE,
         minibatch_size_per_device=LARGE_BATCH_SIZE,
         model_parallel=False,
@@ -127,7 +138,8 @@ MODEL_CONFIGS = [
     ),
     ModelConfig(
         name="EleutherAI/pythia-2.8b",
-        default_lr=DEFAULT_DEFAULT_LR,
+        default_gt_lr=DEFAULT_GT_LR,
+        default_w2s_lr=DEFAULT_W2S_LR,
         eval_batch_size=LARGE_BATCH_SIZE,
         minibatch_size_per_device=LARGE_BATCH_SIZE,
         model_parallel=False,
@@ -135,7 +147,8 @@ MODEL_CONFIGS = [
     ),
     ModelConfig(
         name="EleutherAI/pythia-6.9b",
-        default_lr=DEFAULT_DEFAULT_LR,
+        default_gt_lr=DEFAULT_GT_LR,
+        default_w2s_lr=DEFAULT_W2S_LR,
         eval_batch_size=SMALL_BATCH_SIZE,
         minibatch_size_per_device=SMALL_BATCH_SIZE,
         model_parallel=False,
@@ -144,7 +157,8 @@ MODEL_CONFIGS = [
     ),
     ModelConfig(
         name="EleutherAI/pythia-6.9b",
-        default_lr=DEFAULT_DEFAULT_LR,
+        default_gt_lr=DEFAULT_GT_LR,
+        default_w2s_lr=DEFAULT_W2S_LR,
         eval_batch_size=LARGE_BATCH_SIZE,
         minibatch_size_per_device=MEDIUM_BATCH_SIZE,
         model_parallel=False,
@@ -153,7 +167,8 @@ MODEL_CONFIGS = [
     ),
     ModelConfig(
         name="EleutherAI/pythia-12b",
-        default_lr=DEFAULT_DEFAULT_LR,
+        default_gt_lr=DEFAULT_GT_LR,
+        default_w2s_lr=DEFAULT_W2S_LR,
         eval_batch_size=LARGE_BATCH_SIZE,
         minibatch_size_per_device=MEDIUM_BATCH_SIZE,
         model_parallel=True,
@@ -162,7 +177,8 @@ MODEL_CONFIGS = [
     ),
     ModelConfig(
         name="mistralai/Mistral-7B-v0.1",
-        default_lr=DEFAULT_DEFAULT_LR,
+        default_gt_lr=DEFAULT_GT_LR,
+        default_w2s_lr=DEFAULT_W2S_LR,
         eval_batch_size=LARGE_BATCH_SIZE,
         lora_modules=MISTRAL_LORA_MODULES,
         minibatch_size_per_device=MEDIUM_BATCH_SIZE,
@@ -172,7 +188,8 @@ MODEL_CONFIGS = [
     ),
     ModelConfig(
         name="mistralai/Mixtral-8x7B-v0.1",
-        default_lr=DEFAULT_DEFAULT_LR,
+        default_gt_lr=DEFAULT_GT_LR,
+        default_w2s_lr=DEFAULT_W2S_LR,
         eval_batch_size=1,
         minibatch_size_per_device=1,
         lora_modules=MISTRAL_LORA_MODULES,
@@ -183,7 +200,8 @@ MODEL_CONFIGS = [
     ),
     ModelConfig(
         name="Qwen/Qwen1.5-0.5B",
-        default_lr=DEFAULT_DEFAULT_LR,
+        default_gt_lr=DEFAULT_GT_LR,
+        default_w2s_lr=DEFAULT_W2S_LR,
         eval_batch_size=LARGE_BATCH_SIZE,
         minibatch_size_per_device=LARGE_BATCH_SIZE,
         lora_modules=QWEN_LORA_MODULES,
@@ -193,7 +211,8 @@ MODEL_CONFIGS = [
     ),
     ModelConfig(
         name="Qwen/Qwen1.5-1.8B",
-        default_lr=DEFAULT_DEFAULT_LR,
+        default_gt_lr=DEFAULT_GT_LR,
+        default_w2s_lr=DEFAULT_W2S_LR,
         eval_batch_size=LARGE_BATCH_SIZE,
         minibatch_size_per_device=LARGE_BATCH_SIZE,
         lora_modules=QWEN_LORA_MODULES,
@@ -203,7 +222,8 @@ MODEL_CONFIGS = [
     ),
     ModelConfig(
         name="Qwen/Qwen1.5-4B",
-        default_lr=DEFAULT_DEFAULT_LR,
+        default_gt_lr=DEFAULT_GT_LR,
+        default_w2s_lr=DEFAULT_W2S_LR,
         eval_batch_size=LARGE_BATCH_SIZE,
         minibatch_size_per_device=MEDIUM_BATCH_SIZE,
         lora_modules=QWEN_LORA_MODULES,
@@ -213,7 +233,8 @@ MODEL_CONFIGS = [
     ),
     ModelConfig(
         name="Qwen/Qwen1.5-7B",
-        default_lr=DEFAULT_DEFAULT_LR,
+        default_gt_lr=DEFAULT_GT_LR,
+        default_w2s_lr=DEFAULT_W2S_LR,
         eval_batch_size=LARGE_BATCH_SIZE,
         minibatch_size_per_device=MEDIUM_BATCH_SIZE,
         lora_modules=QWEN_LORA_MODULES,
@@ -223,7 +244,8 @@ MODEL_CONFIGS = [
     ),
     ModelConfig(
         name="Qwen/Qwen1.5-14B",
-        default_lr=DEFAULT_DEFAULT_LR,
+        default_gt_lr=DEFAULT_GT_LR,
+        default_w2s_lr=DEFAULT_W2S_LR,
         eval_batch_size=LARGE_BATCH_SIZE,
         minibatch_size_per_device=MEDIUM_BATCH_SIZE,
         lora_modules=QWEN_LORA_MODULES,
@@ -233,7 +255,8 @@ MODEL_CONFIGS = [
     ),
     ModelConfig(
         name="Qwen/Qwen-1_8B",
-        default_lr=DEFAULT_DEFAULT_LR,
+        default_gt_lr=DEFAULT_GT_LR,
+        default_w2s_lr=DEFAULT_W2S_LR,
         eval_batch_size=LARGE_BATCH_SIZE,
         minibatch_size_per_device=LARGE_BATCH_SIZE,
         lora_modules=QWEN_LORA_MODULES,
@@ -243,7 +266,8 @@ MODEL_CONFIGS = [
     ),
     ModelConfig(
         name="Qwen/Qwen-7B",
-        default_lr=DEFAULT_DEFAULT_LR,
+        default_gt_lr=DEFAULT_GT_LR,
+        default_w2s_lr=DEFAULT_W2S_LR,
         eval_batch_size=LARGE_BATCH_SIZE,
         minibatch_size_per_device=MEDIUM_BATCH_SIZE,
         lora_modules=QWEN_LORA_MODULES,
@@ -253,7 +277,8 @@ MODEL_CONFIGS = [
     ),
     ModelConfig(
         name="Qwen/Qwen-14B",
-        default_lr=DEFAULT_DEFAULT_LR,
+        default_gt_lr=DEFAULT_GT_LR,
+        default_w2s_lr=DEFAULT_W2S_LR,
         eval_batch_size=MEDIUM_BATCH_SIZE,
         minibatch_size_per_device=SMALL_BATCH_SIZE,
         lora_modules=QWEN_LORA_MODULES,
@@ -264,7 +289,8 @@ MODEL_CONFIGS = [
     ),
     ModelConfig(
         name="Qwen/Qwen-72B",
-        default_lr=DEFAULT_DEFAULT_LR,
+        default_gt_lr=DEFAULT_GT_LR,
+        default_w2s_lr=DEFAULT_W2S_LR,
         eval_batch_size=1,
         lora_modules=QWEN_LORA_MODULES,
         gradient_checkpointing=True,
@@ -277,7 +303,8 @@ MODEL_CONFIGS = [
     ),
     ModelConfig(
         name="facebook/opt-125m",
-        default_lr=OPT_DEFAULT_LR,
+        default_gt_lr=OPT_GT_LR,
+        default_w2s_lr=OPT_W2S_LR,
         eval_batch_size=LARGE_BATCH_SIZE,
         minibatch_size_per_device=LARGE_BATCH_SIZE,
         model_parallel=False,
@@ -285,7 +312,8 @@ MODEL_CONFIGS = [
     ),
     ModelConfig(
         name="facebook/opt-350m",
-        default_lr=OPT_DEFAULT_LR,
+        default_gt_lr=OPT_GT_LR,
+        default_w2s_lr=OPT_W2S_LR,
         eval_batch_size=LARGE_BATCH_SIZE,
         minibatch_size_per_device=LARGE_BATCH_SIZE,
         model_parallel=False,
@@ -293,7 +321,8 @@ MODEL_CONFIGS = [
     ),
     ModelConfig(
         name="facebook/opt-2.7b",
-        default_lr=OPT_DEFAULT_LR,
+        default_gt_lr=OPT_GT_LR,
+        default_w2s_lr=OPT_W2S_LR,
         eval_batch_size=LARGE_BATCH_SIZE,
         minibatch_size_per_device=LARGE_BATCH_SIZE,
         model_parallel=False,
@@ -301,7 +330,8 @@ MODEL_CONFIGS = [
     ),
     ModelConfig(
         name="facebook/opt-6.7b",
-        default_lr=OPT_DEFAULT_LR,
+        default_gt_lr=OPT_GT_LR,
+        default_w2s_lr=OPT_W2S_LR,
         eval_batch_size=LARGE_BATCH_SIZE,
         minibatch_size_per_device=MEDIUM_BATCH_SIZE,
         model_parallel=False,
@@ -311,7 +341,8 @@ MODEL_CONFIGS = [
     ),
     ModelConfig(
         name="facebook/opt-13b",
-        default_lr=OPT_DEFAULT_LR,
+        default_gt_lr=OPT_GT_LR,
+        default_w2s_lr=OPT_W2S_LR,
         eval_batch_size=MEDIUM_BATCH_SIZE,
         minibatch_size_per_device=SMALL_BATCH_SIZE,
         model_parallel=True,
@@ -321,7 +352,8 @@ MODEL_CONFIGS = [
     ),
     ModelConfig(
         name="facebook/opt-30b",
-        default_lr=OPT_DEFAULT_LR,
+        default_gt_lr=OPT_GT_LR,
+        default_w2s_lr=OPT_W2S_LR,
         eval_batch_size=MEDIUM_BATCH_SIZE,
         minibatch_size_per_device=SMALL_BATCH_SIZE,
         model_parallel=True,
@@ -331,7 +363,8 @@ MODEL_CONFIGS = [
     ),
     ModelConfig(
         name="bigscience/bloom-560m",
-        default_lr=DEFAULT_DEFAULT_LR,
+        default_gt_lr=DEFAULT_GT_LR,
+        default_w2s_lr=DEFAULT_W2S_LR,
         eval_batch_size=LARGE_BATCH_SIZE,
         minibatch_size_per_device=LARGE_BATCH_SIZE,
         model_parallel=False,
@@ -339,7 +372,8 @@ MODEL_CONFIGS = [
     ),
     ModelConfig(
         name="bigscience/bloom-3b",
-        default_lr=DEFAULT_DEFAULT_LR,
+        default_gt_lr=DEFAULT_GT_LR,
+        default_w2s_lr=DEFAULT_W2S_LR,
         eval_batch_size=LARGE_BATCH_SIZE,
         minibatch_size_per_device=LARGE_BATCH_SIZE,
         model_parallel=False,
@@ -349,7 +383,8 @@ MODEL_CONFIGS = [
     ),
     ModelConfig(
         name="bigscience/bloom-7b1",
-        default_lr=DEFAULT_DEFAULT_LR,
+        default_gt_lr=DEFAULT_GT_LR,
+        default_w2s_lr=DEFAULT_W2S_LR,
         eval_batch_size=LARGE_BATCH_SIZE,
         minibatch_size_per_device=MEDIUM_BATCH_SIZE,
         model_parallel=False,
@@ -359,7 +394,8 @@ MODEL_CONFIGS = [
     ),
     ModelConfig(
         name="bigscience/bloom",  # 176B parameters
-        default_lr=DEFAULT_DEFAULT_LR,
+        default_gt_lr=DEFAULT_GT_LR,
+        default_w2s_lr=DEFAULT_W2S_LR,
         eval_batch_size=1,
         minibatch_size_per_device=1,
         model_parallel=True,
@@ -370,7 +406,8 @@ MODEL_CONFIGS = [
     ),
     ModelConfig(
         name="stabilityai/stablelm-base-alpha-3b",
-        default_lr=DEFAULT_DEFAULT_LR,
+        default_gt_lr=DEFAULT_GT_LR,
+        default_w2s_lr=DEFAULT_W2S_LR,
         eval_batch_size=LARGE_BATCH_SIZE,
         minibatch_size_per_device=LARGE_BATCH_SIZE,
         model_parallel=False,
@@ -378,7 +415,8 @@ MODEL_CONFIGS = [
     ),
     ModelConfig(
         name="stabilityai/stablelm-base-alpha-7b",
-        default_lr=DEFAULT_DEFAULT_LR,
+        default_gt_lr=DEFAULT_GT_LR,
+        default_w2s_lr=DEFAULT_W2S_LR,
         eval_batch_size=LARGE_BATCH_SIZE,
         minibatch_size_per_device=MEDIUM_BATCH_SIZE,
         model_parallel=False,
@@ -388,7 +426,8 @@ MODEL_CONFIGS = [
     ),
     ModelConfig(
         name="EleutherAI/gpt-neo-2.7B",
-        default_lr=DEFAULT_DEFAULT_LR,
+        default_gt_lr=DEFAULT_GT_LR,
+        default_w2s_lr=DEFAULT_W2S_LR,
         eval_batch_size=LARGE_BATCH_SIZE,
         minibatch_size_per_device=LARGE_BATCH_SIZE,
         model_parallel=False,
@@ -396,7 +435,8 @@ MODEL_CONFIGS = [
     ),
     ModelConfig(
         name="EleutherAI/gpt-j-6b",
-        default_lr=DEFAULT_DEFAULT_LR,
+        default_gt_lr=DEFAULT_GT_LR,
+        default_w2s_lr=DEFAULT_W2S_LR,
         eval_batch_size=LARGE_BATCH_SIZE,
         minibatch_size_per_device=LARGE_BATCH_SIZE,
         model_parallel=False,
@@ -406,7 +446,8 @@ MODEL_CONFIGS = [
     ),
     ModelConfig(
         name="EleutherAI/gpt-neox-20b",
-        default_lr=DEFAULT_DEFAULT_LR,
+        default_gt_lr=DEFAULT_GT_LR,
+        default_w2s_lr=DEFAULT_W2S_LR,
         eval_batch_size=MEDIUM_BATCH_SIZE,
         minibatch_size_per_device=SMALL_BATCH_SIZE,
         model_parallel=True,
@@ -416,7 +457,8 @@ MODEL_CONFIGS = [
     ),
     ModelConfig(
         name="meta-llama/Llama-2-7b-hf",
-        default_lr=DEFAULT_DEFAULT_LR,
+        default_gt_lr=DEFAULT_GT_LR,
+        default_w2s_lr=DEFAULT_W2S_LR,
         eval_batch_size=LARGE_BATCH_SIZE,
         minibatch_size_per_device=LARGE_BATCH_SIZE,
         model_parallel=False,
@@ -426,7 +468,8 @@ MODEL_CONFIGS = [
     ),
     ModelConfig(
         name="meta-llama/Llama-2-13b-hf",
-        default_lr=DEFAULT_DEFAULT_LR,
+        default_gt_lr=DEFAULT_GT_LR,
+        default_w2s_lr=DEFAULT_W2S_LR,
         eval_batch_size=LARGE_BATCH_SIZE,
         minibatch_size_per_device=LARGE_BATCH_SIZE,
         model_parallel=True,
@@ -436,7 +479,8 @@ MODEL_CONFIGS = [
     ),
     ModelConfig(
         name="meta-llama/Llama-2-70b-hf",
-        default_lr=DEFAULT_DEFAULT_LR,
+        default_gt_lr=DEFAULT_GT_LR,
+        default_w2s_lr=DEFAULT_W2S_LR,
         eval_batch_size=LARGE_BATCH_SIZE,
         minibatch_size_per_device=LARGE_BATCH_SIZE,
         model_parallel=True,
@@ -446,7 +490,8 @@ MODEL_CONFIGS = [
     ),
     ModelConfig(
         name="huggyllama/llama-7b",
-        default_lr=DEFAULT_DEFAULT_LR,
+        default_gt_lr=DEFAULT_GT_LR,
+        default_w2s_lr=DEFAULT_W2S_LR,
         eval_batch_size=LARGE_BATCH_SIZE,
         minibatch_size_per_device=LARGE_BATCH_SIZE,
         model_parallel=False,
@@ -456,7 +501,8 @@ MODEL_CONFIGS = [
     ),
     ModelConfig(
         name="huggyllama/llama-13b",
-        default_lr=DEFAULT_DEFAULT_LR,
+        default_gt_lr=DEFAULT_GT_LR,
+        default_w2s_lr=DEFAULT_W2S_LR,
         eval_batch_size=LARGE_BATCH_SIZE,
         minibatch_size_per_device=LARGE_BATCH_SIZE,
         model_parallel=True,
@@ -466,7 +512,8 @@ MODEL_CONFIGS = [
     ),
     ModelConfig(
         name="huggyllama/llama-30b",
-        default_lr=DEFAULT_DEFAULT_LR,
+        default_gt_lr=DEFAULT_GT_LR,
+        default_w2s_lr=DEFAULT_W2S_LR,
         eval_batch_size=LARGE_BATCH_SIZE,
         minibatch_size_per_device=LARGE_BATCH_SIZE,
         model_parallel=True,
@@ -476,7 +523,8 @@ MODEL_CONFIGS = [
     ),
     ModelConfig(
         name="huggyllama/llama-65b",
-        default_lr=DEFAULT_DEFAULT_LR,
+        default_gt_lr=DEFAULT_GT_LR,
+        default_w2s_lr=DEFAULT_W2S_LR,
         eval_batch_size=LARGE_BATCH_SIZE,
         minibatch_size_per_device=LARGE_BATCH_SIZE,
         model_parallel=True,

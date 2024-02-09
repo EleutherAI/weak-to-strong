@@ -85,7 +85,11 @@ def main(
             "Learning rates were tuned on batch size 32, you probably want to sweep LR "
             "if you are tuning batch size"
         )
-        lr = model_config.default_lr
+        lr = (
+            model_config.default_w2s_lr
+            if is_w2s
+            else model_config.default_gt_lr
+        )
         use_default_lr = True
 
     if optim is None:
