@@ -98,7 +98,7 @@ def main(
             f"weak_{weak_model_size}_"
             f"ds_{ds_name}_"
             f"coef_best_{coef_best}_"
-            f"coef_final_{coef_final}"
+            f"coef_final_{coef_final}_"
             f"evaluate_task_vector"
         )
         wandb.init(
