@@ -111,6 +111,7 @@ def main(
             coef_best = wandb.config.coef_best
             coef_final = wandb.config.coef_final
         else:
+            print(f"Manual run, coef_best={coef_best}, coef_final={coef_final}")
             wandb.config.update({
                 "coef_best": coef_best,
                 "coef_final": coef_final,
