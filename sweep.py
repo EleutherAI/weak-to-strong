@@ -66,16 +66,24 @@ def main(
     print("Running ground truth models")
     for model_size in all_model_sizes:
         print(f"Running ground truth {model_size}")
-        train_simple_main(model_size=model_size, **kwargs)
+        try:
+            train_simple_main(model_size=model_size, **kwargs)
+        except Exception as e:
+            print(f"Failed to run ground truth {model_size}: {e}")
 
     print("Running transfer models")
     for weak_model_size, strong_model_size in weak_to_strong_model_sizes:
         print(f"Running weak {weak_model_size} to strong {strong_model_size}")
-        train_simple_main(
-            model_size=strong_model_size,
-            weak_model_size=weak_model_size,
-            **kwargs,
-        )
+        try:
+            train_simple_main(
+                model_size=strong_model_size,
+                weak_model_size=weak_model_size,
+                **kwargs,
+            )
+        except Exception as e:
+            print(
+                f"Failed to run weak {weak_model_size} to strong {strong_model_size}: {e}"
+            )
     print("Finished running all models")
 
 

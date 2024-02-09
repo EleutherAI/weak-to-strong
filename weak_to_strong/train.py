@@ -20,7 +20,8 @@ from weak_to_strong.model import TransformerWithHead
 from weak_to_strong.config import ModelConfig
 
 
-def save(model: torch.nn.Module, save_path: str, optimizer=None, scheduler=None):
+def save(model: torch.nn.Module, save_path: Optional[str], optimizer=None, scheduler=None):
+    assert save_path, "must provide save_path if save_every is not None"
     # Note: If the model is wrapped by DataParallel, we need to unwrap it before saving
     model_to_save = model.module if hasattr(model, "module") else model
 
@@ -37,6 +38,7 @@ def train_model(
     loss_fn: Callable = kl_loss,
     log_every: int = 400,
     eval_every: Optional[int] = None,
+    save_every: Optional[int] = None,
     eval_batch_size: int = 256,
     minibatch_size: int = 8,
     eval_ds: Optional[datasets.Dataset] = None,
@@ -117,8 +119,6 @@ def train_model(
                     eval_ds is not None
                 ), "must provide eval_ds if eval_every is not None"
                 eval_results = eval_model_acc(model, eval_ds, eval_batch_size)
-                if save_path:
-                    save(model, save_path, optimizer, lr_scheduler)
                 if gradient_checkpointing:
                     (
                         model
@@ -131,6 +131,8 @@ def train_model(
                 eval_acc_dict[step] = eval_acc
                 logger.logkv("eval_accuracy", eval_acc)
                 wandb.log({"eval/accuracy": eval_acc})
+            if save_every and (step + 1) % save_every == 0:
+                save(model, save_path, optimizer, lr_scheduler)
             all_logits = []
             all_labels = []
             for mbatch in to_batch(
@@ -150,6 +152,9 @@ def train_model(
 
                 all_logits.extend(logits.to(io_device))
                 all_labels.extend(labels)
+            if len(all_logits) == 0:
+                # skip batches too small to form a single minibatch
+                continue
             all_logits = torch.stack(all_logits)
             all_labels = torch.stack(all_labels)
             all_hard_labels = torch.argmax(all_labels, dim=1)
@@ -210,7 +215,7 @@ def train_model(
         logger.logkv("eval_accuracy", eval_acc)
         wandb.log({"eval/accuracy": eval_acc})
         logger.dumpkvs()
-    if save_path:
+    if save_every:
         save(model, save_path, optimizer, lr_scheduler)
     return final_eval_results
 
@@ -234,6 +239,7 @@ def train_and_save_model(
     lr_schedule: str = "constant",
     optimizer_name: str = "adam",
     eval_every: Optional[int] = None,
+    save_every: Optional[int] = None,
 ) -> tuple:
     if eval_batch_size is None:
         eval_batch_size = batch_size
@@ -300,11 +306,14 @@ def train_and_save_model(
             minibatch_size = min(
                 minibatch_size_per_device * torch.cuda.device_count(), batch_size
             )
+            eval_batch_size = min(torch.cuda.device_count(), eval_batch_size)
             print(
                 "Using",
                 torch.cuda.device_count(),
                 "GPUs, setting minibatch_size to",
                 minibatch_size,
+                "and eval_batch_size to",
+                eval_batch_size,
             )
         else:
             minibatch_size = minibatch_size_per_device

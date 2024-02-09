@@ -57,6 +57,8 @@ def main(
     # Grount-truth fine-tuning does not do any intermediate evals.
     w2s_eval_every: int = 10000000,
     # If set, this command will be run to sync the results to remote storage
+    # non-positive values mean we don't save any checkpoints
+    save_every: int = 1000000,
     sync_command: Optional[str] = None,
     skip_if_exists: bool = False,
 ):  
@@ -109,6 +111,7 @@ def main(
         # "results_folder": results_folder,
         "linear_probe": linear_probe,
         "lr_schedule": lr_schedule,
+        # "save_every": save_every,
         # "sweep_subfolder": sweep_subfolder,
     }
     if is_w2s:
@@ -230,6 +233,7 @@ def main(
         lr_schedule=lr_schedule,
         optimizer_name=optim,
         eval_every=eval_every,
+        save_every=save_every,
     )
 
     if weak_ds is not None:
