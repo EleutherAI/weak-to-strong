@@ -23,6 +23,7 @@ def main(
         f"sweep_task_vector_{datetime.now().strftime('%Y-%m-%d_%H-%M-%S')}"
     )
     coef_values = torch.arange(coef_min, coef_max, coef_step).tolist()
+
     sweep_configuration = {
         "name": wandb_name,
         "method": sweep_method,
@@ -33,25 +34,17 @@ def main(
         },
     }
     sweep_id = wandb.sweep(sweep=sweep_configuration, project="weak-to-strong")
-    wandb.agent(
-        sweep_id,
-        lambda: evaluate_task_vector_main(
-            coef_best=1,
-            coef_final=0,
-            force_init=True,
-            **kwargs
-        ),
-        count=1,
+    evaluate_task_vector_main(
+        coef_best=1,
+        coef_final=0,
+        force_init=True,
+        **kwargs
     )
-    wandb.agent(
-        sweep_id,
-        lambda: evaluate_task_vector_main(
-            coef_best=0,
-            coef_final=1,
-            force_init=True,
-            **kwargs
-        ),
-        count=1,
+    evaluate_task_vector_main(
+        coef_best=0,
+        coef_final=1,
+        force_init=True,
+        **kwargs
     )
     wandb.agent(
         sweep_id,

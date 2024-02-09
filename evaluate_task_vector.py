@@ -99,7 +99,6 @@ def main(
             f"ds_{ds_name}_"
             f"evaluate_task_vector"
         )
-        print(f"Setting config: {config}")
         wandb.init(
             config=config,
             group=kwargs.get("sweep_subfolder", "default"),
@@ -108,15 +107,8 @@ def main(
             dir=kwargs.get("results_folder", "./results"),
             reinit=True,
         )
-        if coef_best is None or coef_final is None:
-            coef_best = wandb.config.coef_best
-            coef_final = wandb.config.coef_final
-        else:
-            print(f"Manual run, coef_best={coef_best}, coef_final={coef_final}")
-            wandb.config.update({
-                "coef_best": coef_best,
-                "coef_final": coef_final,
-            }, allow_val_change=True)
+        coef_best = wandb.config.coef_best
+        coef_final = wandb.config.coef_final
     assert coef_best is not None
     assert coef_final is not None
     coef_best_float = (
