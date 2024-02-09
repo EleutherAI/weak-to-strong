@@ -35,12 +35,22 @@ def main(
     sweep_id = wandb.sweep(sweep=sweep_configuration, project="weak-to-strong")
     wandb.agent(
         sweep_id,
-        lambda: evaluate_task_vector_main(coef_best=1, coef_final=0, **kwargs),
+        lambda: evaluate_task_vector_main(
+            coef_best=1,
+            coef_final=0,
+            force_init=True,
+            **kwargs
+        ),
         count=1,
     )
     wandb.agent(
         sweep_id,
-        lambda: evaluate_task_vector_main(coef_best=0, coef_final=1, **kwargs),
+        lambda: evaluate_task_vector_main(
+            coef_best=0,
+            coef_final=1,
+            force_init=True,
+            **kwargs
+        ),
         count=1,
     )
     wandb.agent(

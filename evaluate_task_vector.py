@@ -73,6 +73,10 @@ def main(
     Returns:
         Ground truth accuracy of the new model
     """
+    if force_init:
+        print(f"Force init: {force_init}")
+        print(f"wandb.run: {wandb.run}")
+        print(f"wandb.config: {wandb.config}")
     if force_init or coef_best is None or coef_final is None:
         # Called from wandb.sweep
         config = {}
