@@ -73,7 +73,7 @@ def main(
     Returns:
         Ground truth accuracy of the new model
     """
-    if force_init:
+    if isinstance(coef_best, int) or force_init or abs(1 - coef_best)< 1e-6:
         print(f"Force init: {force_init}")
         print(f"wandb.run: {wandb.run}")
         print(f"wandb.config: {wandb.config}")
