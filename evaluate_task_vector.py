@@ -1,8 +1,9 @@
 import json
-import numpy as np
 import os
+from typing import Optional
 
 import torch
+import wandb
 from weak_to_strong.common import get_tokenizer
 from weak_to_strong.config import MODELS_DICT
 from weak_to_strong.datasets import tokenize_dataset
@@ -14,8 +15,8 @@ from weak_to_strong.datasets import load_and_process_dataset
 
 
 def main(
-    coef_best: float | torch.Tensor,
-    coef_final: float | torch.Tensor,
+    coef_best: Optional[float | torch.Tensor] = None,
+    coef_final: Optional[float | torch.Tensor] = None,
     model_size: str = "mistralai/Mistral-7B-v0.1",
     weak_model_size: str = "gpt2",
     ds_name: str = "sciq",
@@ -69,6 +70,43 @@ def main(
     Returns:
         Ground truth accuracy of the new model
     """
+    if coef_best is None or coef_final is None:
+        # Called from wandb.sweep
+        config = {}
+        config.update(kwargs)
+        config.update({
+            "coef_best": coef_best,
+            "coef_final": coef_final,
+            "model_size": model_size,
+            "weak_model_size": weak_model_size,
+            "ds_name": ds_name,
+            "w2s_eval_every": w2s_eval_every,
+            "seed": seed,
+            "max_ctx": max_ctx,
+            "n_train1_docs": n_train1_docs,
+            "n_train2_docs": n_train2_docs,
+            "n_test_docs": n_test_docs,
+            "linear_probe": linear_probe,
+            "store": store,
+            "verbose": verbose,
+        })
+        wandb_name = (
+            f"model_{kwargs.get('model_size', 'default').split('/')[-1]}_"
+            f"ds_{kwargs.get('ds_name', 'default')}_"
+            f"evaluate_task_vector"
+        )
+        wandb.init(
+            config=config,
+            group=kwargs.get("sweep_subfolder", "default"),
+            job_type="task_vector",
+            name=wandb_name,
+            dir=kwargs.get("results_folder", "/tmp/results"),
+            reinit=True,
+        )
+        coef_best = wandb.config.coef_best
+        coef_final = wandb.config.coef_final
+    assert coef_best is not None
+    assert coef_final is not None
     coef_best_float = (
         coef_best.item()
         if isinstance(coef_best, torch.Tensor)
@@ -165,6 +203,8 @@ def main(
         res_dict[key] = test_acc.item()
         with open(os.path.join(save_path, "results_summary.json"), "w") as f:
             json.dump(res_dict, f, indent=2)
+    if wandb.run is not None:
+        wandb.log({"task_vector/accuracy": test_acc.item()})
     return test_acc, test_loss
 
 
