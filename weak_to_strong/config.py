@@ -31,7 +31,7 @@ class ModelConfig:
 
     Args:
         name (str): The name of the model.
-        memory (float): 
+        memory (float):
             The memory required for the model in bytes.
         default_lr (float, optional):
             The default learning rate. Defaults to 1e-5.
@@ -41,14 +41,22 @@ class ModelConfig:
             The minibatch size per device. Defaults to None.
         lora_modules (list[str], optional):
             The list of LORA modules. Defaults to None.
+            If None, then LORA is not used.
         custom_kwargs (dict, optional):
-            Custom keyword arguments. Defaults to None.
+            Arguments to pass to HF's from_pretrained(). Defaults to None.
         gradient_checkpointing (bool, optional):
             Whether to use gradient checkpointing. Defaults to None.
         model_parallel (bool, optional):
-            Whether to use model parallelism. Defaults to None.
+            Whether to use model parallelism.
+            Defaults to true if the memory requirement exceeds a threshold and
+            there are multiple GPUs available.
+            Model parallelism uses accelerate's automatic model sharding,
+            while if model-parallel is false and you're using multiple GPUs,
+            then it uses data parallelism.
         default_optimizer (str, optional):
             The default optimizer. Defaults to "adam".
+        max_ctx (int, optional):
+            The maximum context length. Defaults to 512.
     """
 
     CHECKPOINTING_MEMORY = 3e9
@@ -63,6 +71,7 @@ class ModelConfig:
     gradient_checkpointing: bool
     model_parallel: bool
     default_optimizer: str
+    max_ctx: int
 
     def __init__(
         self,
@@ -76,6 +85,7 @@ class ModelConfig:
         gradient_checkpointing: Optional[bool] = None,
         model_parallel: Optional[bool] = None,
         default_optimizer: str = "adam",
+        max_ctx: int = 512,
     ):
         custom_kwargs = custom_kwargs or {}
         per_device_ram = torch.cuda.get_device_properties(0).total_memory
@@ -106,6 +116,7 @@ class ModelConfig:
         self.gradient_checkpointing = gradient_checkpointing
         self.model_parallel = model_parallel
         self.default_optimizer = default_optimizer
+        self.max_ctx = max_ctx
 
 
 MODELS_DICT: dict[str, ModelConfig] = {
