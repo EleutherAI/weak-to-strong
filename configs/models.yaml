@@ -21,6 +21,7 @@ models:
     memory: 5.5e8
     default_lr: 5e-5
     lora_modules: *gpt2_modules
+    torch_dtype: torch.float32
 
   - name: gpt2-medium
     memory: 1.5e9
@@ -61,23 +62,17 @@ models:
     memory: 2.4e10
     minibatch_size_per_device: 2
     lora_modules: *gpt_neox_modules
-    custom_kwargs:
-      torch_dtype: torch.bfloat16
 
   - name: mistralai/Mistral-7B-v0.1
     memory: 1.5e10
     eval_batch_size: 2
     lora_modules: *mistralai_modules
-    custom_kwargs:
-      torch_dtype: torch.bfloat16
 
   - name: Qwen/Qwen-1_8B
     memory: 3.67e9
     eval_batch_size: 2
     custom_kwargs:
       trust_remote_code: true
-      bf16: True
-      fp32: False
       revision: 5fde88dff770a7d036847211f5d9d9705f0caa69
 
   - name: Qwen/Qwen-7B
@@ -85,8 +80,6 @@ models:
     eval_batch_size: 2
     custom_kwargs:
       trust_remote_code: true
-      bf16: True
-      fp32: False
       revision: d4efd21e866b9cb3466cb65b963933f5e98016d1
 
   - name: Qwen/Qwen-14B
@@ -94,6 +87,4 @@ models:
     eval_batch_size: 2
     custom_kwargs:
       trust_remote_code: true
-      bf16: True
-      fp32: False
       revision: 8be2854218fea9054331e217fd26a06f3fd02004

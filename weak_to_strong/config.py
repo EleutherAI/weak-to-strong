@@ -57,6 +57,10 @@ class ModelConfig:
             The default optimizer. Defaults to "adam".
         max_ctx (int, optional):
             The maximum context length. Defaults to 512.
+        torch_dtype (str, optional):
+            The torch data type. Defaults to None.
+            If None and not set in custom_kwargs, then it defaults to
+            "torch.bfloat16".
     """
 
     CHECKPOINTING_MEMORY = 3e9
@@ -72,6 +76,7 @@ class ModelConfig:
     model_parallel: bool
     default_optimizer: str
     max_ctx: int
+    torch_dtype: str
 
     def __init__(
         self,
@@ -86,6 +91,7 @@ class ModelConfig:
         model_parallel: Optional[bool] = None,
         default_optimizer: str = "adam",
         max_ctx: int = 512,
+        torch_dtype: Optional[str] = None,
     ):
         custom_kwargs = custom_kwargs or {}
         per_device_ram = torch.cuda.get_device_properties(0).total_memory
@@ -99,13 +105,15 @@ class ModelConfig:
             gradient_checkpointing = memory > self.CHECKPOINTING_MEMORY
         if minibatch_size_per_device is None:
             minibatch_size_per_device = eval_batch_size
-        if not torch.cuda.is_bf16_supported() and (
-            custom_kwargs.get("torch_dtype") == "torch.bfloat16"
-        ):
+        if torch_dtype is not None:
+            assert custom_kwargs.get("torch_dtype") is None
+            custom_kwargs["torch_dtype"] = torch_dtype
+        elif custom_kwargs.get("torch_dtype") is not None:
+            torch_dtype = custom_kwargs["torch_dtype"]
+        else:
+            torch_dtype = "torch.bfloat16"
+        if not torch.cuda.is_bf16_supported():
             custom_kwargs["torch_dtype"] = "torch.float32"
-        if not torch.cuda.is_bf16_supported() and custom_kwargs.get("bf16"):
-            custom_kwargs["bf16"] = False
-            custom_kwargs["fp32"] = True
         self.name = name
         self.memory = memory
         self.default_lr = default_lr
@@ -117,6 +125,7 @@ class ModelConfig:
         self.model_parallel = model_parallel
         self.default_optimizer = default_optimizer
         self.max_ctx = max_ctx
+        self.torch_dtype = torch_dtype
 
 
 MODELS_DICT: dict[str, ModelConfig] = {
