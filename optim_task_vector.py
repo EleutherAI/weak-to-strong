@@ -1,3 +1,4 @@
+from typing import Optional
 import torch
 import torch_optimizer as toptim
 from transformers import get_linear_schedule_with_warmup
@@ -30,7 +31,7 @@ def main(
     task_max_steps: int = 20,
     task_max_steps_wo_improvement: int = 5,
     task_log_every: int = 5,
-    task_device: str = "cuda",
+    task_device: Optional[str] = None,
     task_dtype: str = "float32",
     task_seed: int = 0,
     task_lr_schedule: str = "linear",
@@ -52,6 +53,7 @@ def main(
         "task_lr_schedule": task_lr_schedule,
     })
     wandb_name = (
+        "optim_task_vector_"
         f"model_{kwargs.get('model_size', 'default').split('/')[-1]}_"
         f"ds_{kwargs.get('ds_name', 'default')}_"
         f"task_optim_{task_optim}"
@@ -65,9 +67,9 @@ def main(
         dir=kwargs.get("results_folder", "./results"),
         reinit=True,
     )
-    module = TaskVectorModule(**kwargs).to(
-        device=task_device, dtype=dtype
-    )
+    module = TaskVectorModule(**kwargs).to(dtype=dtype)
+    if task_device is not None:
+        module = module.to(device=task_device)
     assert module.coefs.requires_grad
     print(f"coefs dtype: {module.coefs.dtype}")
     print(f"coefs device: {module.coefs.device}")
@@ -113,8 +115,8 @@ def main(
             optimizer, lr_schedule_fn
         )
     # train
-    best_loss = torch.tensor([1.0], device=task_device, dtype=dtype)
-    best_acc = torch.tensor([0.0], device=task_device, dtype=dtype)
+    best_loss = 1.0
+    best_acc = 0.0
     steps_wo_improvement = 0
     for step in range(task_max_steps):
         acc, loss = module()
@@ -130,8 +132,8 @@ def main(
                 "accuracy": acc.item(),
             })
         if loss < best_loss:
-            best_loss = loss
-            best_acc = acc
+            best_loss = loss.item()
+            best_acc = acc.item()
             steps_wo_improvement = 0
         else:
             steps_wo_improvement += 1
@@ -143,12 +145,12 @@ def main(
         print(f"coef grads: {module.coefs.grad}")
         optimizer.step()
         lr_scheduler.step()
-    print(f"best_loss: {best_loss.item()}")
-    print(f"best_accuracy: {best_acc.item()}")
+    print(f"best_loss: {best_loss}")
+    print(f"best_accuracy: {best_acc}")
     print(f"best_coefs: {module.coefs.detach().tolist()}")
     wandb.log({
-        "best_loss": best_loss.item(),
-        "best_accuracy": best_acc.item(),
+        "best_loss": best_loss,
+        "best_accuracy": best_acc,
         "best_coef_best": module.coefs[0].item(),
         "best_coef_final": module.coefs[1].item(),
     })

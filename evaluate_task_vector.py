@@ -72,8 +72,24 @@ def main(
     Returns:
         Ground truth accuracy of the new model
     """
-    if wandb.run is None or coef_best is None or coef_final is None:
+    not_init = wandb.run is None
+    needs_coef = coef_best is None or coef_final is None
+    coef_needs_update = (
+        wandb.run is not None
+        and coef_best is not None
+        and wandb.config.get("coef_best") is not None
+        and wandb.config.get("coef_best") != coef_best
+    )
+    needs_init = not_init or needs_coef or coef_needs_update
+    if needs_init:
         # Called from wandb.sweep
+        print(
+            f"Initializing wandb because not_init={not_init}, "
+            f"needs_coef={needs_coef}, coef_needs_update={coef_needs_update}, "
+            f"wandb.run is None={wandb.run is None}, "
+            f"coef_best={coef_best}, coef_final={coef_final}, "
+            f"wandb.config: {wandb.config}"
+        )
         config = {}
         config.update(kwargs)
         config.update({
