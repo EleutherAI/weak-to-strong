@@ -26,6 +26,31 @@ def load_config(config_path='configs/default.yaml'):
 
 
 class ModelConfig:
+    """
+    Configuration class for the model.
+
+    Args:
+        name (str): The name of the model.
+        memory (float): 
+            The memory required for the model in bytes.
+        default_lr (float, optional):
+            The default learning rate. Defaults to 1e-5.
+        eval_batch_size (int, optional):
+            The batch size for evaluation. Defaults to 32.
+        minibatch_size_per_device (int, optional):
+            The minibatch size per device. Defaults to None.
+        lora_modules (list[str], optional):
+            The list of LORA modules. Defaults to None.
+        custom_kwargs (dict, optional):
+            Custom keyword arguments. Defaults to None.
+        gradient_checkpointing (bool, optional):
+            Whether to use gradient checkpointing. Defaults to None.
+        model_parallel (bool, optional):
+            Whether to use model parallelism. Defaults to None.
+        default_optimizer (str, optional):
+            The default optimizer. Defaults to "adam".
+    """
+
     CHECKPOINTING_MEMORY = 3e9
     MODEL_PARALLEL_FACTOR = 2
     name: str
