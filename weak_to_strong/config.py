@@ -82,7 +82,7 @@ class ModelConfig:
         n_devices = torch.cuda.device_count()
         if model_parallel is None:
             model_parallel = (
-                n_devices > 1 and 
+                n_devices > 1 and
                 per_device_ram < self.MODEL_PARALLEL_FACTOR * memory
             )
         if gradient_checkpointing is None:
