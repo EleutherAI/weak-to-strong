@@ -19,6 +19,8 @@ from weak_to_strong.loss import kl_loss
 from weak_to_strong.model import TransformerWithHead
 from weak_to_strong.config import ModelConfig
 
+MBATCH_KEYS = ["input_ids", "soft_label", "choice_input_ids"]
+
 
 def save(model: torch.nn.Module, save_path: str, optimizer=None, scheduler=None):
     # Note: If the model is wrapped by DataParallel, we need to unwrap it before saving
@@ -131,17 +133,7 @@ def train_model(
             for mbatch in to_batch(
                 ds, minibatch_size, start=start, end=start + batch_size
             ):
-                batch_len = len(mbatch)
-                # If this is the last batch and it's smaller than
-                # the minibatch_size...
-                if batch_len < minibatch_size:
-                    # Calculate number of padding examples needed
-                    padding_size = minibatch_size - batch_len
-                    # Create clone of the last example for padding
-                    padding_example = {key: torch.stack([val[-1]]*padding_size) for key, val in mbatch.items()}
-                    # Extend the mbatch with padding examples
-                    for key, val in padding_example.items():
-                        mbatch[key] = torch.cat((mbatch[key], val), dim=0)
+                mbatch_len = len(mbatch)
                 input_ids = (
                     torch.nn.utils.rnn.pad_sequence(
                         [torch.tensor(ids) for ids in mbatch["input_ids"]]
@@ -150,14 +142,60 @@ def train_model(
                     .to(io_device)
                 )
                 labels = torch.tensor(mbatch["soft_label"]).to(io_device)
+                assert input_ids.shape[0] == mbatch_len, (
+                    f"input_ids.shape[0] ({input_ids.shape[0]}) != mbatch_len "
+                    f"({mbatch_len})"
+                )
+                assert labels.shape[0] == mbatch_len, (
+                    f"labels.shape[0] ({labels.shape[0]}) != mbatch_len "
+                    f"({mbatch_len})"
+                )
+                assert labels.ndim == 1, f"labels.ndim ({labels.ndim}) != 1"
+                assert input_ids.ndim == 2, f"input_ids.ndim ({input_ids.ndim}) != 2"
+                choice_input_ids = mbatch.get("choice_input_ids")
+                padding_size = max(0, minibatch_size - mbatch_len)
+                if padding_size > 0:
+                    # If this is the last batch and it's smaller than
+                    # the minibatch_size then add padding
+                    input_ids = torch.cat(
+                        [input_ids, torch.zeros(
+                            padding_size, 
+                            input_ids.shape[1],
+                            device=io_device,
+                            dtype=input_ids.dtype,
+                        )],
+                        dim=0,
+                    )
+                    labels = torch.cat(
+                        [labels, torch.zeros(
+                            padding_size, 
+                            labels.shape[1],
+                            device=io_device,
+                            dtype=labels.dtype,
+                        )],
+                        dim=0,
+                    )
+                    if choice_input_ids is not None:
+                        choice_input_ids = torch.cat(
+                            [
+                                choice_input_ids,
+                                torch.zeros(
+                                    padding_size, 
+                                    choice_input_ids.shape[1],
+                                    device=io_device,
+                                    dtype=choice_input_ids.dtype,
+                                ),
+                            ],
+                            dim=0,
+                        )
                 logits = model(
-                    input_ids, choice_input_ids=mbatch.get("choice_input_ids")
+                    input_ids, choice_input_ids=choice_input_ids,
                 )
 
                 # Ensure only the actual predictions and labels are extended,
                 # not the padded ones
-                all_logits.extend(logits[:batch_len].to(io_device))
-                all_labels.extend(labels[:batch_len])
+                all_logits.extend(logits[:mbatch_len].to(io_device))
+                all_labels.extend(labels[:mbatch_len])
             all_logits = torch.stack(all_logits)
             all_labels = torch.stack(all_labels)
             all_hard_labels = torch.argmax(all_labels, dim=1)
