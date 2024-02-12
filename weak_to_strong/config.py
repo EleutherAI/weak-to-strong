@@ -101,6 +101,18 @@ class ModelConfig:
 
 GPT_NEOX_LORA_MODULES = ["dense_h_to_4h", "dense_4h_to_h", "query_key_value"]
 GPT2_LORA_MODULES = ["c_fc", "c_proj", "c_attn"]
+QWEN_LORA_MODULES = [
+    "up_proj",
+    "down_proj",
+    "gate_proj",
+    "k_proj",
+    "q_proj",
+    "v_proj",
+]
+QWEN1_5_KWARGS = {
+    "trust_remote_code": True,
+    "torch_dtype": torch.bfloat16 if torch.cuda.is_bf16_supported() else torch.float32,
+}
 per_device_ram = torch.cuda.get_device_properties(0).total_memory
 
 # NOTE learning rates are not particularly tuned, work somewhat reasonably at train batch size 32
@@ -233,6 +245,16 @@ MODEL_CONFIGS = [
             if torch.cuda.is_bf16_supported()
             else torch.float32,
         },
+    ),
+    ModelConfig(
+        name="Qwen/Qwen1.5-0.5B",
+        default_lr=1e-5,
+        eval_batch_size=32,
+        minibatch_size_per_device=32,
+        lora_modules=QWEN_LORA_MODULES,
+        gradient_checkpointing=True,
+        model_parallel=False,
+        custom_kwargs=QWEN1_5_KWARGS,
     ),
     ModelConfig(
         name="Qwen/Qwen-1_8B",
