@@ -19,8 +19,6 @@ from weak_to_strong.loss import kl_loss
 from weak_to_strong.model import TransformerWithHead
 from weak_to_strong.config import ModelConfig
 
-MBATCH_KEYS = ["input_ids", "soft_label", "choice_input_ids"]
-
 
 def save(model: torch.nn.Module, save_path: str, optimizer=None, scheduler=None):
     # Note: If the model is wrapped by DataParallel, we need to unwrap it before saving
@@ -98,7 +96,6 @@ def train_model(
     step = 0
     losses = []
     accuracies = []
-    accuracy_errors = []
     aurocs = []
     eval_acc_dict = {}
 
@@ -135,14 +132,16 @@ def train_model(
                 ds, minibatch_size, start=start, end=start + batch_size
             ):
                 mbatch_len = len(mbatch["input_ids"])
+                if mbatch_len == 0:
+                    continue
                 input_ids = (
                     torch.nn.utils.rnn.pad_sequence(
                         [torch.tensor(ids) for ids in mbatch["input_ids"]]
                     )
                     .transpose(0, 1)
                     .to(io_device)
-                ) # [batch, pos]
-                labels = torch.tensor(mbatch["soft_label"]).to(io_device) # [batch, num_classes]
+                )  # [batch, pos]
+                labels = torch.tensor(mbatch["soft_label"]).to(io_device)  # [batch, num_classes]
                 choice_input_ids = mbatch.get("choice_input_ids")
                 padding_size = max(0, minibatch_size - mbatch_len)
                 if padding_size > 0:
@@ -187,6 +186,8 @@ def train_model(
                 # not the padded ones
                 all_logits.extend(logits[:mbatch_len].to(io_device))
                 all_labels.extend(labels[:mbatch_len])
+            if len(all_logits) == 0:
+                continue
             all_logits = torch.stack(all_logits)
             all_labels = torch.stack(all_labels)
             all_hard_labels = torch.argmax(all_labels, dim=1)
@@ -201,10 +202,6 @@ def train_model(
                 torch.argmax(all_logits, dim=1) == all_hard_labels
             ).to(torch.float32)
             accuracies.append(torch.mean(is_correct).item())
-            accuracy_errors.append(
-                np.std(is_correct.cpu().numpy()) / 
-                np.sqrt(len(all_hard_labels))
-            )
 
             try:
                 auroc = roc_auc_score(all_hard_labels.cpu(), all_logprobs.cpu())
@@ -218,7 +215,6 @@ def train_model(
                     "progress": step / nsteps,
                     "loss": loss_tot,
                     "train_accuracy": accuracies[-1],
-                    "train_accuracy_error": accuracy_errors[-1],
                     "train_auroc": aurocs[-1],
                     "lr": lr_scheduler.get_last_lr()[0],
             }
