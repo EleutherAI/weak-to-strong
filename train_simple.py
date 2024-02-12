@@ -191,15 +191,16 @@ def main(
         sweep_subfolder=sweep_subfolder,
         config_name=config_name,
     )
-    wandb.init(
-        project="weak-to-strong",
-        config=config,
-        group=sweep_subfolder,
-        job_type="gt" if weak_labels_path is None else "w2s",
-        name=f"{model_size.split('/')[-1]}_{ds_name}_{loss}",
-        dir=results_folder,
-        reinit=True,
-    )
+    if wandb.run is None:
+        wandb.init(
+            project="weak-to-strong",
+            config=config,
+            group=sweep_subfolder,
+            job_type="gt" if weak_labels_path is None else "w2s",
+            name=f"{model_size.split('/')[-1]}_{ds_name}_{loss}",
+            dir=results_folder,
+            reinit=True,
+        )
 
     # Tokenize datasets
     tokenizer = get_tokenizer(model_config.name)

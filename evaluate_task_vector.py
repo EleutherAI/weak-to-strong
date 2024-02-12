@@ -29,7 +29,6 @@ def main(
     linear_probe: bool = False,
     store: bool = False,
     verbose: bool = False,
-    force_init: bool = False,
     **kwargs
 ) -> tuple[torch.Tensor, torch.Tensor]:
     """Evaluate the task vector arithmetic on ground truth labels.
@@ -73,7 +72,7 @@ def main(
     Returns:
         Ground truth accuracy of the new model
     """
-    if force_init or coef_best is None or coef_final is None:
+    if wandb.run is None or coef_best is None or coef_final is None:
         # Called from wandb.sweep
         config = {}
         config.update(kwargs)
@@ -94,13 +93,14 @@ def main(
             "verbose": verbose,
         })
         wandb_name = (
-            f"model_{model_size.split('/')[-1]}_"
+            f"evaluate_task_vector_model_{model_size.split('/')[-1]}_"
             f"weak_{weak_model_size}_"
-            f"ds_{ds_name}_"
-            f"coef_best_{coef_best}_"
-            f"coef_final_{coef_final}_"
-            f"evaluate_task_vector"
+            f"ds_{ds_name}"
         )
+        if coef_best is not None:
+            wandb_name += f"_coef_best_{coef_best}"
+        if coef_final is not None:
+            wandb_name += f"_coef_final_{coef_final}"
         wandb.init(
             config=config,
             group=kwargs.get("sweep_subfolder", "default"),

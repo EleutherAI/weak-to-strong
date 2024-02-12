@@ -239,7 +239,7 @@ MODEL_CONFIGS = [
         ],
         minibatch_size_per_device=1,  # this needs adjusting for GPU/dataset
         gradient_checkpointing=True,
-        model_parallel=False,
+        model_parallel=True,
         custom_kwargs={
             "torch_dtype": torch.bfloat16  # we can only do this because we're using LoRA
             if torch.cuda.is_bf16_supported()

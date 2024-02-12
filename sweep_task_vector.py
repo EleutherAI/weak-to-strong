@@ -37,13 +37,11 @@ def main(
     evaluate_task_vector_main(
         coef_best=1,
         coef_final=0,
-        force_init=True,
         **kwargs
     )
     evaluate_task_vector_main(
         coef_best=0,
         coef_final=1,
-        force_init=True,
         **kwargs
     )
     wandb.agent(

@@ -163,7 +163,6 @@ class TransformerWithHead(PreTrainedModel):
         print(f"update_coef={update_coef}")
         if not isinstance(update_coef, torch.Tensor):
             update_coef = torch.tensor(update_coef)
-        update_coef.to(device=self.device, dtype=self.dtype)
         state_dict = torch.load(path)
         state_dict = {
             k.replace("transformer.module", "transformer"): v
@@ -172,14 +171,18 @@ class TransformerWithHead(PreTrainedModel):
 
         # directly update model state using update_coef
         updated = False
+        last_cuda_device = None
         for name, state in state_dict.items():
             if "lora" in name or "score" in name:
-                state = state.to(device=self.device, dtype=self.dtype)
-                state.requires_grad_(False)
                 orig_param = get_attr(self, name.split("."))
-                orig_param = orig_param.to(
-                    device=self.device, dtype=self.dtype
-                )
+                if orig_param.is_cuda:
+                    last_cuda_device = orig_param.device
+                else:
+                    print(f"Moving {name} to {last_cuda_device}")
+                    orig_param = orig_param.to(device=last_cuda_device)
+                state = state.to(device=orig_param.device, dtype=orig_param.dtype)
+                state.requires_grad_(False)
+                update_coef = update_coef.to(device=orig_param.device, dtype=orig_param.dtype)
                 assert (state != orig_param).any()
                 updated_param = (
                     update_coef * state +

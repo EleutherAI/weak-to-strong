@@ -118,7 +118,7 @@ def eval_model_accuracy_loss(
     model.eval()
     io_device = model.device if hasattr(model, "device") else 0
     print("Evaluating model accuracy and loss")
-    print(f"device={io_device}")
+    print(f"io_device={io_device}")
     print(f"batch_size={batch_size}")
     print(f"minibatch_size={minibatch_size}")
 
