@@ -72,6 +72,10 @@ def main(
     epochs = w2s_epochs if is_w2s else gt_epochs
     loss = loss if is_w2s else "xent"
 
+    # this is per device!
+    if minibatch_size_per_device is None:
+        minibatch_size_per_device = model_config.minibatch_size_per_device
+
     use_default_lr = False
     if lr is None:
         assert batch_size == 32, (
