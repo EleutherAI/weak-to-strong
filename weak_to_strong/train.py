@@ -98,6 +98,7 @@ def train_model(
     step = 0
     losses = []
     accuracies = []
+    accuracy_errors = []
     aurocs = []
     eval_acc_dict = {}
 
@@ -133,25 +134,15 @@ def train_model(
             for mbatch in to_batch(
                 ds, minibatch_size, start=start, end=start + batch_size
             ):
-                mbatch_len = len(mbatch)
+                mbatch_len = len(mbatch["input_ids"])
                 input_ids = (
                     torch.nn.utils.rnn.pad_sequence(
                         [torch.tensor(ids) for ids in mbatch["input_ids"]]
                     )
                     .transpose(0, 1)
                     .to(io_device)
-                )
-                labels = torch.tensor(mbatch["soft_label"]).to(io_device)
-                assert input_ids.shape[0] == mbatch_len, (
-                    f"input_ids.shape[0] ({input_ids.shape[0]}) != mbatch_len "
-                    f"({mbatch_len})"
-                )
-                assert labels.shape[0] == mbatch_len, (
-                    f"labels.shape[0] ({labels.shape[0]}) != mbatch_len "
-                    f"({mbatch_len})"
-                )
-                assert labels.ndim == 1, f"labels.ndim ({labels.ndim}) != 1"
-                assert input_ids.ndim == 2, f"input_ids.ndim ({input_ids.ndim}) != 2"
+                ) # [batch, pos]
+                labels = torch.tensor(mbatch["soft_label"]).to(io_device) # [batch, num_classes]
                 choice_input_ids = mbatch.get("choice_input_ids")
                 padding_size = max(0, minibatch_size - mbatch_len)
                 if padding_size > 0:
@@ -206,12 +197,13 @@ def train_model(
             loss_tot += loss.item()
             loss.backward()
             losses.append(loss_tot)
-            accuracies.append(
-                torch.mean(
-                    (torch.argmax(all_logits, dim=1) == all_hard_labels).to(
-                        torch.float32
-                    )
-                ).item()
+            is_correct = (
+                torch.argmax(all_logits, dim=1) == all_hard_labels
+            ).to(torch.float32)
+            accuracies.append(torch.mean(is_correct).item())
+            accuracy_errors.append(
+                np.std(is_correct.cpu().numpy()) / 
+                np.sqrt(len(all_hard_labels))
             )
 
             try:
@@ -226,6 +218,7 @@ def train_model(
                     "progress": step / nsteps,
                     "loss": loss_tot,
                     "train_accuracy": accuracies[-1],
+                    "train_accuracy_error": accuracy_errors[-1],
                     "train_auroc": aurocs[-1],
                     "lr": lr_scheduler.get_last_lr()[0],
             }
