@@ -23,7 +23,7 @@ from weak_to_strong.train import train_and_save_model
 def main(
     # training batch size (number of examples per update)
     batch_size: int = 32,
-    max_ctx: Optional[int] = None,
+    max_ctx: int = 1024,
     ds_name: str = "sciq",
     loss: str = "kl",
     # number of documents
@@ -75,9 +75,6 @@ def main(
     # this is per device!
     if minibatch_size_per_device is None:
         minibatch_size_per_device = model_config.minibatch_size_per_device
-
-    if max_ctx is None:
-        max_ctx = model_config.max_ctx
 
     use_default_lr = False
     if lr is None:

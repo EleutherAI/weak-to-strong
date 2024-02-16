@@ -55,8 +55,6 @@ class ModelConfig:
             then it uses data parallelism.
         default_optimizer (str, optional):
             The default optimizer. Defaults to "adam".
-        max_ctx (int, optional):
-            The maximum context length. Defaults to 512.
         torch_dtype (str, optional):
             The torch data type. Defaults to None.
             If None and not set in custom_kwargs, then it defaults to
@@ -75,7 +73,6 @@ class ModelConfig:
     gradient_checkpointing: bool
     model_parallel: bool
     default_optimizer: str
-    max_ctx: int
     torch_dtype: str
 
     def __init__(
@@ -90,7 +87,6 @@ class ModelConfig:
         gradient_checkpointing: Optional[bool] = None,
         model_parallel: Optional[bool] = None,
         default_optimizer: str = "adam",
-        max_ctx: int = 512,
         torch_dtype: Optional[str] = None,
     ):
         custom_kwargs = custom_kwargs or {}
@@ -124,8 +120,7 @@ class ModelConfig:
         self.gradient_checkpointing = gradient_checkpointing
         self.model_parallel = model_parallel
         self.default_optimizer = default_optimizer
-        self.max_ctx = max_ctx
-        self.torch_dtype = torch_dtype
+        self.torch_dtype = torch_dtype  # type: ignore
 
 
 MODELS_DICT: dict[str, ModelConfig] = {
