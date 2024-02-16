@@ -88,7 +88,8 @@ class ModelConfig:
         model_parallel: Optional[bool] = None,
         default_optimizer: str = "adam",
         torch_dtype: Optional[str] = None,
-    ):
+    ):  
+        memory = float(memory)
         custom_kwargs = custom_kwargs or {}
         per_device_ram = torch.cuda.get_device_properties(0).total_memory
         n_devices = torch.cuda.device_count()

@@ -1,4 +1,11 @@
 lora_modules:
+  default: &default_modules
+    - up_proj
+    - down_proj
+    - gate_proj
+    - k_proj
+    - q_proj
+    - v_proj
   gpt_neox: &gpt_neox_modules
     - dense_h_to_4h
     - dense_4h_to_h
@@ -7,14 +14,7 @@ lora_modules:
     - c_fc
     - c_proj
     - c_attn
-  mistralai: &mistralai_modules
-    - up_proj
-    - down_proj
-    - gate_proj
-    - k_proj
-    - q_proj
-    - v_proj
-
+  
 # NOTE learning rates are not particularly tuned, work somewhat reasonably at train batch size 32
 models:
   - name: gpt2
@@ -34,7 +34,7 @@ models:
 
   - name: gpt2-xl
     memory: 6.43e9
-    eval_batch_size: 2
+    eval_batch_size: 8
     lora_modules: *gpt2_modules
 
   - name: EleutherAI/pythia-14m
@@ -65,26 +65,64 @@ models:
 
   - name: mistralai/Mistral-7B-v0.1
     memory: 1.5e10
-    eval_batch_size: 2
-    lora_modules: *mistralai_modules
+    eval_batch_size: 8
+    lora_modules: *default_modules
 
   - name: Qwen/Qwen-1_8B
     memory: 3.67e9
-    eval_batch_size: 2
+    eval_batch_size: 8
+    lora_modules: *default_modules
     custom_kwargs:
       trust_remote_code: true
       revision: 5fde88dff770a7d036847211f5d9d9705f0caa69
 
   - name: Qwen/Qwen-7B
     memory: 1.6e10
-    eval_batch_size: 2
+    eval_batch_size: 8
+    lora_modules: *default_modules
     custom_kwargs:
       trust_remote_code: true
       revision: d4efd21e866b9cb3466cb65b963933f5e98016d1
 
   - name: Qwen/Qwen-14B
     memory: 3e10
-    eval_batch_size: 2
+    eval_batch_size: 8
+    lora_modules: *default_modules
     custom_kwargs:
       trust_remote_code: true
       revision: 8be2854218fea9054331e217fd26a06f3fd02004
+
+  - name: meta-llama/Llama2-7b-hf
+    memory: 1.4e10
+    eval_batch_size: 8
+    lora_modules: *default_modules
+
+  - name: meta-llama/Llama2-13b-hf
+    memory: 2.6e10
+    eval_batch_size: 8
+    lora_modules: *default_modules
+
+  - name: meta-llama/Llama2-70b-hf
+    memory: 1.4e11
+    eval_batch_size: 8
+    lora_modules: *default_modules
+
+  - name: huggyllama/llama-7b
+    memory: 1.4e10
+    eval_batch_size: 8
+    lora_modules: *default_modules
+
+  - name: huggyllama/llama-13b
+    memory: 2.6e10
+    eval_batch_size: 8
+    lora_modules: *default_modules
+
+  - name: huggyllama/llama-30b
+    memory: 6.5e10
+    eval_batch_size: 8
+    lora_modules: *default_modules
+
+  - name: huggyllama/llama-65b
+    memory: 1.3e11
+    eval_batch_size: 8
+    lora_modules: *default_modules
