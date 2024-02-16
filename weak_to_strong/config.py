@@ -1,541 +1,131 @@
 import torch
-from dataclasses import dataclass
 from typing import Optional
+
+import yaml
 
 from weak_to_strong.loss import logconf_loss_fn, product_loss_fn, xent_loss, kl_loss
 
 
-@dataclass
+def load_config(config_path='configs/default.yaml'):
+    """
+    Load the YAML configuration file.
+
+    Parameters:
+    - config_path (str): Path to the YAML configuration file.
+
+    Returns:
+    - dict: Configuration settings.
+    """
+    try:
+        with open(config_path, 'r') as file:
+            config = yaml.safe_load(file)
+        return config
+    except Exception as e:
+        print(f"Error loading the config file {config_path}: {e}")
+        return {}
+
+
 class ModelConfig:
+    """
+    Configuration class for the model.
+
+    Args:
+        name (str): The name of the model.
+        memory (float):
+            The memory required for the model in bytes.
+        default_lr (float, optional):
+            The default learning rate. Defaults to 1e-5.
+        eval_batch_size (int, optional):
+            The batch size for evaluation. Defaults to 32.
+        minibatch_size_per_device (int, optional):
+            The minibatch size per device. Defaults to None.
+        lora_modules (list[str], optional):
+            The list of LORA modules. Defaults to None.
+            If None, then LORA is not used.
+        custom_kwargs (dict, optional):
+            Arguments to pass to HF's from_pretrained(). Defaults to None.
+        gradient_checkpointing (bool, optional):
+            Whether to use gradient checkpointing. Defaults to None.
+        model_parallel (bool, optional):
+            Whether to use model parallelism.
+            Defaults to true if the memory requirement exceeds a threshold and
+            there are multiple GPUs available.
+            Model parallelism uses accelerate's automatic model sharding,
+            while if model-parallel is false and you're using multiple GPUs,
+            then it uses data parallelism.
+        default_optimizer (str, optional):
+            The default optimizer. Defaults to "adam".
+        torch_dtype (str, optional):
+            The torch data type. Defaults to None.
+            If None and not set in custom_kwargs, then it defaults to
+            "torch.bfloat16".
+    """
+
+    CHECKPOINTING_MEMORY = 3e9
+    MODEL_PARALLEL_FACTOR = 2
     name: str
-    default_gt_lr: float
-    default_w2s_lr: float
+    memory: float
+    default_lr: float
     eval_batch_size: int
-    minibatch_size_per_device: Optional[int] = None
-    lora_modules: Optional[list[str]] = None
-    custom_kwargs: Optional[dict] = None
-    gradient_checkpointing: bool = False
-    model_parallel: bool = False
-    default_optimizer: str = "adam"
+    minibatch_size_per_device: int
+    lora_modules: Optional[list[str]]
+    custom_kwargs: dict
+    gradient_checkpointing: bool
+    model_parallel: bool
+    default_optimizer: str
+    torch_dtype: str
+
+    def __init__(
+        self,
+        name: str,
+        memory: float,
+        default_lr: float = 1e-5,
+        eval_batch_size: int = 32,
+        minibatch_size_per_device: Optional[int] = None,
+        lora_modules: Optional[list[str]] = None,
+        custom_kwargs: Optional[dict] = None,
+        gradient_checkpointing: Optional[bool] = None,
+        model_parallel: Optional[bool] = None,
+        default_optimizer: str = "adam",
+        torch_dtype: Optional[str] = None,
+    ):
+        custom_kwargs = custom_kwargs or {}
+        per_device_ram = torch.cuda.get_device_properties(0).total_memory
+        n_devices = torch.cuda.device_count()
+        if model_parallel is None:
+            model_parallel = (
+                n_devices > 1 and
+                per_device_ram < self.MODEL_PARALLEL_FACTOR * memory
+            )
+        if gradient_checkpointing is None:
+            gradient_checkpointing = memory > self.CHECKPOINTING_MEMORY
+        if minibatch_size_per_device is None:
+            minibatch_size_per_device = eval_batch_size
+        if torch_dtype is not None:
+            assert custom_kwargs.get("torch_dtype") is None
+            custom_kwargs["torch_dtype"] = torch_dtype
+        elif custom_kwargs.get("torch_dtype") is not None:
+            torch_dtype = custom_kwargs["torch_dtype"]
+        else:
+            torch_dtype = "torch.bfloat16"
+        if not torch.cuda.is_bf16_supported():
+            custom_kwargs["torch_dtype"] = "torch.float32"
+        self.name = name
+        self.memory = memory
+        self.default_lr = default_lr
+        self.eval_batch_size = eval_batch_size
+        self.minibatch_size_per_device = minibatch_size_per_device
+        self.lora_modules = lora_modules
+        self.custom_kwargs = custom_kwargs
+        self.gradient_checkpointing = gradient_checkpointing
+        self.model_parallel = model_parallel
+        self.default_optimizer = default_optimizer
+        self.torch_dtype = torch_dtype  # type: ignore
 
 
-GPT_NEOX_LORA_MODULES = ["dense_h_to_4h", "dense_4h_to_h", "query_key_value"]
-GPT2_LORA_MODULES = ["c_fc", "c_proj", "c_attn"]
-MISTRAL_LORA_MODULES = [
-    "up_proj",
-    "down_proj",
-    "gate_proj",
-    "k_proj",
-    "q_proj",
-    "v_proj",
-]
-QWEN_LORA_MODULES = [
-    "up_proj",
-    "down_proj",
-    "gate_proj",
-    "k_proj",
-    "q_proj",
-    "v_proj",
-]
-OPT_LORA_MODULES = [
-    "fc1",
-    "fc2",
-    "k_proj",
-    "q_proj",
-    "v_proj",
-]
-per_device_ram = torch.cuda.get_device_properties(0).total_memory
-BFLOAT_KWARGS = {
-    "torch_dtype": torch.bfloat16
-    if torch.cuda.is_bf16_supported()
-    else torch.float32  # okay because we're using LoRA
-}
-QWEN_KWARGS = {
-    "trust_remote_code": True,
-    "torch_dtype": torch.bfloat16 if torch.cuda.is_bf16_supported() else torch.float32,
-    "revision": "5fde88dff770a7d036847211f5d9d9705f0caa69",
-}
-QWEN1_5_KWARGS = {
-    "trust_remote_code": True,
-    "torch_dtype": torch.bfloat16 if torch.cuda.is_bf16_supported() else torch.float32,
-}
-DEFAULT_GT_LR = 1e-5
-DEFAULT_W2S_LR = 2e-5
-OPT_GT_LR = 1e-3
-OPT_W2S_LR = 2e-3
-SMALL_BATCH_SIZE = 2
-MEDIUM_BATCH_SIZE = 16
-LARGE_BATCH_SIZE = 32
-
-# NOTE learning rates are not particularly tuned, work somewhat reasonably at train batch size 32
-# NOTE minibatch_size_per_device needs adjusting for GPU/dataset
-MODEL_CONFIGS = [
-    ModelConfig(
-        name="gpt2",
-        default_gt_lr=5e-5,
-        default_w2s_lr=1e-4,
-        eval_batch_size=LARGE_BATCH_SIZE,
-        lora_modules=GPT2_LORA_MODULES,
-    ),
-    ModelConfig(
-        name="gpt2-medium",
-        default_gt_lr=5e-5,
-        default_w2s_lr=1e-4,
-        eval_batch_size=LARGE_BATCH_SIZE,
-        lora_modules=GPT2_LORA_MODULES,
-    ),
-    ModelConfig(
-        name="gpt2-large",
-        default_gt_lr=DEFAULT_GT_LR,
-        default_w2s_lr=DEFAULT_W2S_LR,
-        eval_batch_size=LARGE_BATCH_SIZE,
-        lora_modules=GPT2_LORA_MODULES,
-    ),
-    ModelConfig(
-        name="gpt2-xl",
-        default_gt_lr=DEFAULT_GT_LR,
-        default_w2s_lr=DEFAULT_W2S_LR,
-        eval_batch_size=LARGE_BATCH_SIZE,
-        gradient_checkpointing=True,
-        lora_modules=GPT2_LORA_MODULES,
-        model_parallel=False
-    ),
-    ModelConfig(
-        name="EleutherAI/pythia-14m",
-        default_gt_lr=DEFAULT_GT_LR,
-        default_w2s_lr=DEFAULT_W2S_LR,
-        eval_batch_size=LARGE_BATCH_SIZE,
-        minibatch_size_per_device=LARGE_BATCH_SIZE,
-        model_parallel=False,
-        lora_modules=GPT_NEOX_LORA_MODULES,
-    ),
-    ModelConfig(
-        name="EleutherAI/pythia-70m",
-        default_gt_lr=DEFAULT_GT_LR,
-        default_w2s_lr=DEFAULT_W2S_LR,
-        eval_batch_size=LARGE_BATCH_SIZE,
-        minibatch_size_per_device=LARGE_BATCH_SIZE,
-        model_parallel=False,
-        lora_modules=GPT_NEOX_LORA_MODULES,
-    ),
-    ModelConfig(
-        name="EleutherAI/pythia-160m",
-        default_gt_lr=DEFAULT_GT_LR,
-        default_w2s_lr=DEFAULT_W2S_LR,
-        eval_batch_size=LARGE_BATCH_SIZE,
-        minibatch_size_per_device=LARGE_BATCH_SIZE,
-        model_parallel=False,
-        lora_modules=GPT_NEOX_LORA_MODULES,
-    ),
-    ModelConfig(
-        name="EleutherAI/pythia-410m",
-        default_gt_lr=DEFAULT_GT_LR,
-        default_w2s_lr=DEFAULT_W2S_LR,
-        eval_batch_size=LARGE_BATCH_SIZE,
-        minibatch_size_per_device=LARGE_BATCH_SIZE,
-        model_parallel=False,
-        lora_modules=GPT_NEOX_LORA_MODULES,
-    ),
-    ModelConfig(
-        name="EleutherAI/pythia-2.8b",
-        default_gt_lr=DEFAULT_GT_LR,
-        default_w2s_lr=DEFAULT_W2S_LR,
-        eval_batch_size=LARGE_BATCH_SIZE,
-        minibatch_size_per_device=LARGE_BATCH_SIZE,
-        model_parallel=False,
-        lora_modules=GPT_NEOX_LORA_MODULES,
-    ),
-    ModelConfig(
-        name="EleutherAI/pythia-6.9b",
-        default_gt_lr=DEFAULT_GT_LR,
-        default_w2s_lr=DEFAULT_W2S_LR,
-        eval_batch_size=SMALL_BATCH_SIZE,
-        minibatch_size_per_device=SMALL_BATCH_SIZE,
-        model_parallel=False,
-        lora_modules=GPT_NEOX_LORA_MODULES,
-        custom_kwargs=BFLOAT_KWARGS,
-    ),
-    ModelConfig(
-        name="EleutherAI/pythia-6.9b",
-        default_gt_lr=DEFAULT_GT_LR,
-        default_w2s_lr=DEFAULT_W2S_LR,
-        eval_batch_size=LARGE_BATCH_SIZE,
-        minibatch_size_per_device=MEDIUM_BATCH_SIZE,
-        model_parallel=False,
-        lora_modules=GPT_NEOX_LORA_MODULES,
-        custom_kwargs=BFLOAT_KWARGS,
-    ),
-    ModelConfig(
-        name="EleutherAI/pythia-12b",
-        default_gt_lr=DEFAULT_GT_LR,
-        default_w2s_lr=DEFAULT_W2S_LR,
-        eval_batch_size=LARGE_BATCH_SIZE,
-        minibatch_size_per_device=MEDIUM_BATCH_SIZE,
-        model_parallel=True,
-        lora_modules=GPT_NEOX_LORA_MODULES,
-        custom_kwargs=BFLOAT_KWARGS,
-    ),
-    ModelConfig(
-        name="mistralai/Mistral-7B-v0.1",
-        default_gt_lr=DEFAULT_GT_LR,
-        default_w2s_lr=DEFAULT_W2S_LR,
-        eval_batch_size=LARGE_BATCH_SIZE,
-        lora_modules=MISTRAL_LORA_MODULES,
-        minibatch_size_per_device=MEDIUM_BATCH_SIZE,
-        gradient_checkpointing=True,
-        model_parallel=False,
-        custom_kwargs=BFLOAT_KWARGS,
-    ),
-    ModelConfig(
-        name="mistralai/Mixtral-8x7B-v0.1",
-        default_gt_lr=DEFAULT_GT_LR,
-        default_w2s_lr=DEFAULT_W2S_LR,
-        eval_batch_size=1,
-        minibatch_size_per_device=1,
-        lora_modules=MISTRAL_LORA_MODULES,
-        gradient_checkpointing=True,
-        model_parallel=True,
-        custom_kwargs=BFLOAT_KWARGS,
-        default_optimizer="adafactor",
-    ),
-    ModelConfig(
-        name="Qwen/Qwen1.5-0.5B",
-        default_gt_lr=DEFAULT_GT_LR,
-        default_w2s_lr=DEFAULT_W2S_LR,
-        eval_batch_size=LARGE_BATCH_SIZE,
-        minibatch_size_per_device=LARGE_BATCH_SIZE,
-        lora_modules=QWEN_LORA_MODULES,
-        gradient_checkpointing=True,
-        model_parallel=False,
-        custom_kwargs=QWEN1_5_KWARGS,
-    ),
-    ModelConfig(
-        name="Qwen/Qwen1.5-1.8B",
-        default_gt_lr=DEFAULT_GT_LR,
-        default_w2s_lr=DEFAULT_W2S_LR,
-        eval_batch_size=LARGE_BATCH_SIZE,
-        minibatch_size_per_device=LARGE_BATCH_SIZE,
-        lora_modules=QWEN_LORA_MODULES,
-        gradient_checkpointing=True,
-        model_parallel=False,
-        custom_kwargs=QWEN1_5_KWARGS,
-    ),
-    ModelConfig(
-        name="Qwen/Qwen1.5-4B",
-        default_gt_lr=DEFAULT_GT_LR,
-        default_w2s_lr=DEFAULT_W2S_LR,
-        eval_batch_size=LARGE_BATCH_SIZE,
-        minibatch_size_per_device=MEDIUM_BATCH_SIZE,
-        lora_modules=QWEN_LORA_MODULES,
-        gradient_checkpointing=True,
-        model_parallel=False,
-        custom_kwargs=QWEN1_5_KWARGS,
-    ),
-    ModelConfig(
-        name="Qwen/Qwen1.5-7B",
-        default_gt_lr=DEFAULT_GT_LR,
-        default_w2s_lr=DEFAULT_W2S_LR,
-        eval_batch_size=LARGE_BATCH_SIZE,
-        minibatch_size_per_device=MEDIUM_BATCH_SIZE,
-        lora_modules=QWEN_LORA_MODULES,
-        gradient_checkpointing=True,
-        model_parallel=False,
-        custom_kwargs=QWEN1_5_KWARGS,
-    ),
-    ModelConfig(
-        name="Qwen/Qwen1.5-14B",
-        default_gt_lr=DEFAULT_GT_LR,
-        default_w2s_lr=DEFAULT_W2S_LR,
-        eval_batch_size=LARGE_BATCH_SIZE,
-        minibatch_size_per_device=MEDIUM_BATCH_SIZE,
-        lora_modules=QWEN_LORA_MODULES,
-        gradient_checkpointing=True,
-        model_parallel=True,
-        custom_kwargs=QWEN1_5_KWARGS,
-    ),
-    ModelConfig(
-        name="Qwen/Qwen-1_8B",
-        default_gt_lr=DEFAULT_GT_LR,
-        default_w2s_lr=DEFAULT_W2S_LR,
-        eval_batch_size=LARGE_BATCH_SIZE,
-        minibatch_size_per_device=LARGE_BATCH_SIZE,
-        lora_modules=QWEN_LORA_MODULES,
-        gradient_checkpointing=True,
-        model_parallel=False,
-        custom_kwargs=QWEN_KWARGS,
-    ),
-    ModelConfig(
-        name="Qwen/Qwen-7B",
-        default_gt_lr=DEFAULT_GT_LR,
-        default_w2s_lr=DEFAULT_W2S_LR,
-        eval_batch_size=LARGE_BATCH_SIZE,
-        minibatch_size_per_device=MEDIUM_BATCH_SIZE,
-        lora_modules=QWEN_LORA_MODULES,
-        gradient_checkpointing=True,
-        model_parallel=False,
-        custom_kwargs=QWEN_KWARGS,
-    ),
-    ModelConfig(
-        name="Qwen/Qwen-14B",
-        default_gt_lr=DEFAULT_GT_LR,
-        default_w2s_lr=DEFAULT_W2S_LR,
-        eval_batch_size=MEDIUM_BATCH_SIZE,
-        minibatch_size_per_device=SMALL_BATCH_SIZE,
-        lora_modules=QWEN_LORA_MODULES,
-        gradient_checkpointing=True,
-        model_parallel=True,
-        # note: probably need bf16 support and many gpus
-        custom_kwargs=QWEN_KWARGS,
-    ),
-    ModelConfig(
-        name="Qwen/Qwen-72B",
-        default_gt_lr=DEFAULT_GT_LR,
-        default_w2s_lr=DEFAULT_W2S_LR,
-        eval_batch_size=1,
-        lora_modules=QWEN_LORA_MODULES,
-        gradient_checkpointing=True,
-        model_parallel=True,
-        # note: probably need bf16 support and many gpus
-        custom_kwargs=QWEN_KWARGS,
-        # This model is really big, save space by using adafactor.
-        # Note that even then it will take up ~60GB per GPU on an 8-GPU machine.
-        default_optimizer="adafactor",
-    ),
-    ModelConfig(
-        name="facebook/opt-125m",
-        default_gt_lr=OPT_GT_LR,
-        default_w2s_lr=OPT_W2S_LR,
-        eval_batch_size=LARGE_BATCH_SIZE,
-        minibatch_size_per_device=LARGE_BATCH_SIZE,
-        model_parallel=False,
-        lora_modules=OPT_LORA_MODULES,
-    ),
-    ModelConfig(
-        name="facebook/opt-350m",
-        default_gt_lr=OPT_GT_LR,
-        default_w2s_lr=OPT_W2S_LR,
-        eval_batch_size=LARGE_BATCH_SIZE,
-        minibatch_size_per_device=LARGE_BATCH_SIZE,
-        model_parallel=False,
-        lora_modules=OPT_LORA_MODULES,
-    ),
-    ModelConfig(
-        name="facebook/opt-2.7b",
-        default_gt_lr=OPT_GT_LR,
-        default_w2s_lr=OPT_W2S_LR,
-        eval_batch_size=LARGE_BATCH_SIZE,
-        minibatch_size_per_device=LARGE_BATCH_SIZE,
-        model_parallel=False,
-        lora_modules=OPT_LORA_MODULES,
-    ),
-    ModelConfig(
-        name="facebook/opt-6.7b",
-        default_gt_lr=OPT_GT_LR,
-        default_w2s_lr=OPT_W2S_LR,
-        eval_batch_size=LARGE_BATCH_SIZE,
-        minibatch_size_per_device=MEDIUM_BATCH_SIZE,
-        model_parallel=False,
-        lora_modules=OPT_LORA_MODULES,
-        gradient_checkpointing=True,
-        custom_kwargs=BFLOAT_KWARGS,
-    ),
-    ModelConfig(
-        name="facebook/opt-13b",
-        default_gt_lr=OPT_GT_LR,
-        default_w2s_lr=OPT_W2S_LR,
-        eval_batch_size=MEDIUM_BATCH_SIZE,
-        minibatch_size_per_device=SMALL_BATCH_SIZE,
-        model_parallel=True,
-        lora_modules=OPT_LORA_MODULES,
-        gradient_checkpointing=True,
-        custom_kwargs=BFLOAT_KWARGS,
-    ),
-    ModelConfig(
-        name="facebook/opt-30b",
-        default_gt_lr=OPT_GT_LR,
-        default_w2s_lr=OPT_W2S_LR,
-        eval_batch_size=MEDIUM_BATCH_SIZE,
-        minibatch_size_per_device=SMALL_BATCH_SIZE,
-        model_parallel=True,
-        lora_modules=OPT_LORA_MODULES,
-        gradient_checkpointing=True,
-        custom_kwargs=BFLOAT_KWARGS,
-    ),
-    ModelConfig(
-        name="bigscience/bloom-560m",
-        default_gt_lr=DEFAULT_GT_LR,
-        default_w2s_lr=DEFAULT_W2S_LR,
-        eval_batch_size=LARGE_BATCH_SIZE,
-        minibatch_size_per_device=LARGE_BATCH_SIZE,
-        model_parallel=False,
-        lora_modules=GPT_NEOX_LORA_MODULES,
-    ),
-    ModelConfig(
-        name="bigscience/bloom-3b",
-        default_gt_lr=DEFAULT_GT_LR,
-        default_w2s_lr=DEFAULT_W2S_LR,
-        eval_batch_size=LARGE_BATCH_SIZE,
-        minibatch_size_per_device=LARGE_BATCH_SIZE,
-        model_parallel=False,
-        lora_modules=GPT_NEOX_LORA_MODULES,
-        gradient_checkpointing=True,
-        custom_kwargs=BFLOAT_KWARGS,
-    ),
-    ModelConfig(
-        name="bigscience/bloom-7b1",
-        default_gt_lr=DEFAULT_GT_LR,
-        default_w2s_lr=DEFAULT_W2S_LR,
-        eval_batch_size=LARGE_BATCH_SIZE,
-        minibatch_size_per_device=MEDIUM_BATCH_SIZE,
-        model_parallel=False,
-        lora_modules=GPT_NEOX_LORA_MODULES,
-        gradient_checkpointing=True,
-        custom_kwargs=BFLOAT_KWARGS,
-    ),
-    ModelConfig(
-        name="bigscience/bloom",  # 176B parameters
-        default_gt_lr=DEFAULT_GT_LR,
-        default_w2s_lr=DEFAULT_W2S_LR,
-        eval_batch_size=1,
-        minibatch_size_per_device=1,
-        model_parallel=True,
-        lora_modules=GPT_NEOX_LORA_MODULES,
-        gradient_checkpointing=True,
-        custom_kwargs=BFLOAT_KWARGS,
-        default_optimizer="adafactor",
-    ),
-    ModelConfig(
-        name="stabilityai/stablelm-base-alpha-3b",
-        default_gt_lr=DEFAULT_GT_LR,
-        default_w2s_lr=DEFAULT_W2S_LR,
-        eval_batch_size=LARGE_BATCH_SIZE,
-        minibatch_size_per_device=LARGE_BATCH_SIZE,
-        model_parallel=False,
-        lora_modules=GPT_NEOX_LORA_MODULES,
-    ),
-    ModelConfig(
-        name="stabilityai/stablelm-base-alpha-7b",
-        default_gt_lr=DEFAULT_GT_LR,
-        default_w2s_lr=DEFAULT_W2S_LR,
-        eval_batch_size=LARGE_BATCH_SIZE,
-        minibatch_size_per_device=MEDIUM_BATCH_SIZE,
-        model_parallel=False,
-        lora_modules=GPT_NEOX_LORA_MODULES,
-        gradient_checkpointing=True,
-        custom_kwargs=BFLOAT_KWARGS,
-    ),
-    ModelConfig(
-        name="EleutherAI/gpt-neo-2.7B",
-        default_gt_lr=DEFAULT_GT_LR,
-        default_w2s_lr=DEFAULT_W2S_LR,
-        eval_batch_size=LARGE_BATCH_SIZE,
-        minibatch_size_per_device=LARGE_BATCH_SIZE,
-        model_parallel=False,
-        lora_modules=["q_proj", "k_proj", "v_proj", "c_fc", "c_proj"],
-    ),
-    ModelConfig(
-        name="EleutherAI/gpt-j-6b",
-        default_gt_lr=DEFAULT_GT_LR,
-        default_w2s_lr=DEFAULT_W2S_LR,
-        eval_batch_size=LARGE_BATCH_SIZE,
-        minibatch_size_per_device=LARGE_BATCH_SIZE,
-        model_parallel=False,
-        lora_modules=["q_proj", "k_proj", "v_proj", "fc_in", "fc_out"],
-        gradient_checkpointing=True,
-        custom_kwargs=BFLOAT_KWARGS,
-    ),
-    ModelConfig(
-        name="EleutherAI/gpt-neox-20b",
-        default_gt_lr=DEFAULT_GT_LR,
-        default_w2s_lr=DEFAULT_W2S_LR,
-        eval_batch_size=MEDIUM_BATCH_SIZE,
-        minibatch_size_per_device=SMALL_BATCH_SIZE,
-        model_parallel=True,
-        lora_modules=GPT_NEOX_LORA_MODULES,
-        gradient_checkpointing=True,
-        custom_kwargs=BFLOAT_KWARGS,
-    ),
-    ModelConfig(
-        name="meta-llama/Llama-2-7b-hf",
-        default_gt_lr=DEFAULT_GT_LR,
-        default_w2s_lr=DEFAULT_W2S_LR,
-        eval_batch_size=LARGE_BATCH_SIZE,
-        minibatch_size_per_device=LARGE_BATCH_SIZE,
-        model_parallel=False,
-        lora_modules=GPT_NEOX_LORA_MODULES,
-        gradient_checkpointing=True,
-        custom_kwargs=BFLOAT_KWARGS,
-    ),
-    ModelConfig(
-        name="meta-llama/Llama-2-13b-hf",
-        default_gt_lr=DEFAULT_GT_LR,
-        default_w2s_lr=DEFAULT_W2S_LR,
-        eval_batch_size=LARGE_BATCH_SIZE,
-        minibatch_size_per_device=LARGE_BATCH_SIZE,
-        model_parallel=True,
-        lora_modules=GPT_NEOX_LORA_MODULES,
-        gradient_checkpointing=True,
-        custom_kwargs=BFLOAT_KWARGS,
-    ),
-    ModelConfig(
-        name="meta-llama/Llama-2-70b-hf",
-        default_gt_lr=DEFAULT_GT_LR,
-        default_w2s_lr=DEFAULT_W2S_LR,
-        eval_batch_size=LARGE_BATCH_SIZE,
-        minibatch_size_per_device=LARGE_BATCH_SIZE,
-        model_parallel=True,
-        lora_modules=GPT_NEOX_LORA_MODULES,
-        gradient_checkpointing=True,
-        custom_kwargs=BFLOAT_KWARGS,
-    ),
-    ModelConfig(
-        name="huggyllama/llama-7b",
-        default_gt_lr=DEFAULT_GT_LR,
-        default_w2s_lr=DEFAULT_W2S_LR,
-        eval_batch_size=LARGE_BATCH_SIZE,
-        minibatch_size_per_device=LARGE_BATCH_SIZE,
-        model_parallel=False,
-        lora_modules=GPT_NEOX_LORA_MODULES,
-        gradient_checkpointing=True,
-        custom_kwargs=BFLOAT_KWARGS,
-    ),
-    ModelConfig(
-        name="huggyllama/llama-13b",
-        default_gt_lr=DEFAULT_GT_LR,
-        default_w2s_lr=DEFAULT_W2S_LR,
-        eval_batch_size=LARGE_BATCH_SIZE,
-        minibatch_size_per_device=LARGE_BATCH_SIZE,
-        model_parallel=True,
-        lora_modules=GPT_NEOX_LORA_MODULES,
-        gradient_checkpointing=True,
-        custom_kwargs=BFLOAT_KWARGS,
-    ),
-    ModelConfig(
-        name="huggyllama/llama-30b",
-        default_gt_lr=DEFAULT_GT_LR,
-        default_w2s_lr=DEFAULT_W2S_LR,
-        eval_batch_size=LARGE_BATCH_SIZE,
-        minibatch_size_per_device=LARGE_BATCH_SIZE,
-        model_parallel=True,
-        lora_modules=GPT_NEOX_LORA_MODULES,
-        gradient_checkpointing=True,
-        custom_kwargs=BFLOAT_KWARGS,
-    ),
-    ModelConfig(
-        name="huggyllama/llama-65b",
-        default_gt_lr=DEFAULT_GT_LR,
-        default_w2s_lr=DEFAULT_W2S_LR,
-        eval_batch_size=LARGE_BATCH_SIZE,
-        minibatch_size_per_device=LARGE_BATCH_SIZE,
-        model_parallel=True,
-        lora_modules=GPT_NEOX_LORA_MODULES,
-        gradient_checkpointing=True,
-        custom_kwargs=BFLOAT_KWARGS,
-    ),
-    
-]
 MODELS_DICT: dict[str, ModelConfig] = {
-    model_config.name: model_config for model_config in MODEL_CONFIGS
+    cfg["name"]: ModelConfig(**cfg)
+    for cfg in load_config("configs/models.yaml")["models"]
 }
 
 

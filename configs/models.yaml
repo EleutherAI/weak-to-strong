@@ -1,0 +1,90 @@
+lora_modules:
+  gpt_neox: &gpt_neox_modules
+    - dense_h_to_4h
+    - dense_4h_to_h
+    - query_key_value
+  gpt2: &gpt2_modules
+    - c_fc
+    - c_proj
+    - c_attn
+  mistralai: &mistralai_modules
+    - up_proj
+    - down_proj
+    - gate_proj
+    - k_proj
+    - q_proj
+    - v_proj
+
+# NOTE learning rates are not particularly tuned, work somewhat reasonably at train batch size 32
+models:
+  - name: gpt2
+    memory: 5.5e8
+    default_lr: 5e-5
+    lora_modules: *gpt2_modules
+    torch_dtype: torch.float32
+
+  - name: gpt2-medium
+    memory: 1.5e9
+    default_lr: 5e-5
+    lora_modules: *gpt2_modules
+
+  - name: gpt2-large
+    memory: 3.25e9
+    lora_modules: *gpt2_modules
+
+  - name: gpt2-xl
+    memory: 6.43e9
+    eval_batch_size: 2
+    lora_modules: *gpt2_modules
+
+  - name: EleutherAI/pythia-14m
+    memory: 5.3e7
+    lora_modules: *gpt_neox_modules
+
+  - name: EleutherAI/pythia-70m
+    memory: 1.66e8
+    lora_modules: *gpt_neox_modules
+
+  - name: EleutherAI/pythia-160m-v0
+    memory: 3.75e8
+    lora_modules: *gpt_neox_modules
+
+  - name: EleutherAI/pythia-410m
+    memory: 9.11e8
+    lora_modules: *gpt_neox_modules
+
+  - name: EleutherAI/pythia-2.8b
+    memory: 5.68e9
+    minibatch_size_per_device: 2
+    lora_modules: *gpt_neox_modules
+
+  - name: EleutherAI/pythia-12b
+    memory: 2.4e10
+    minibatch_size_per_device: 2
+    lora_modules: *gpt_neox_modules
+
+  - name: mistralai/Mistral-7B-v0.1
+    memory: 1.5e10
+    eval_batch_size: 2
+    lora_modules: *mistralai_modules
+
+  - name: Qwen/Qwen-1_8B
+    memory: 3.67e9
+    eval_batch_size: 2
+    custom_kwargs:
+      trust_remote_code: true
+      revision: 5fde88dff770a7d036847211f5d9d9705f0caa69
+
+  - name: Qwen/Qwen-7B
+    memory: 1.6e10
+    eval_batch_size: 2
+    custom_kwargs:
+      trust_remote_code: true
+      revision: d4efd21e866b9cb3466cb65b963933f5e98016d1
+
+  - name: Qwen/Qwen-14B
+    memory: 3e10
+    eval_batch_size: 2
+    custom_kwargs:
+      trust_remote_code: true
+      revision: 8be2854218fea9054331e217fd26a06f3fd02004

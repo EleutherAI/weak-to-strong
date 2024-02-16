@@ -78,7 +78,7 @@ def main(
 
     # this is per device!
     if minibatch_size_per_device is None:
-        minibatch_size_per_device = model_config.minibatch_size_per_device or 1
+        minibatch_size_per_device = model_config.minibatch_size_per_device
 
     if lr is None:
         assert batch_size == 32, (
