@@ -73,11 +73,11 @@ class ModelConfig:
     gradient_checkpointing: bool
     model_parallel: bool
     default_optimizer: str
-    torch_dtype: str
 
     def __init__(
         self,
         name: str,
+        # memory, in bytes, of the model
         memory: float,
         default_lr: float = 1e-5,
         eval_batch_size: int = 32,
@@ -93,6 +93,22 @@ class ModelConfig:
         custom_kwargs = custom_kwargs or {}
         per_device_ram = torch.cuda.get_device_properties(0).total_memory
         n_devices = torch.cuda.device_count()
+        if torch_dtype is not None:
+            assert custom_kwargs.get("torch_dtype") is None
+            custom_kwargs["torch_dtype"] = {
+                "torch.float32": torch.float32,
+                "torch.float16": torch.float16,
+                "torch.bfloat16": torch.bfloat16,
+            }[torch_dtype]
+        else:
+            custom_kwargs["torch_dtype"] = torch.bfloat16
+        if not torch.cuda.is_bf16_supported() and custom_kwargs["torch_dtype"] == torch.bfloat16:
+            custom_kwargs["torch_dtype"] = torch.float32
+        self.name = name
+        memory_util_est = memory * self.MODEL_PARALLEL_FACTOR
+        if custom_kwargs["torch_dtype"] == torch.float32:
+            memory_util_est *= 2
+            
         if model_parallel is None:
             model_parallel = (
                 n_devices > 1 and
@@ -102,16 +118,6 @@ class ModelConfig:
             gradient_checkpointing = memory > self.CHECKPOINTING_MEMORY
         if minibatch_size_per_device is None:
             minibatch_size_per_device = eval_batch_size
-        if torch_dtype is not None:
-            assert custom_kwargs.get("torch_dtype") is None
-            custom_kwargs["torch_dtype"] = torch_dtype
-        elif custom_kwargs.get("torch_dtype") is not None:
-            torch_dtype = custom_kwargs["torch_dtype"]
-        else:
-            torch_dtype = "torch.bfloat16"
-        if not torch.cuda.is_bf16_supported():
-            custom_kwargs["torch_dtype"] = "torch.float32"
-        self.name = name
         self.memory = memory
         self.default_lr = default_lr
         self.eval_batch_size = eval_batch_size
@@ -121,7 +127,6 @@ class ModelConfig:
         self.gradient_checkpointing = gradient_checkpointing
         self.model_parallel = model_parallel
         self.default_optimizer = default_optimizer
-        self.torch_dtype = torch_dtype  # type: ignore
 
 
 MODELS_DICT: dict[str, ModelConfig] = {

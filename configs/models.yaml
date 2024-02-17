@@ -14,7 +14,13 @@ lora_modules:
     - c_fc
     - c_proj
     - c_attn
-  
+  opt: &opt_modules
+    - fc1
+    - fc2
+    - k_proj
+    - q_proj
+    - v_proj
+    
 # NOTE learning rates are not particularly tuned, work somewhat reasonably at train batch size 32
 models:
   - name: gpt2
@@ -55,17 +61,24 @@ models:
 
   - name: EleutherAI/pythia-2.8b
     memory: 5.68e9
-    minibatch_size_per_device: 2
+    minibatch_size_per_device: 8
     lora_modules: *gpt_neox_modules
 
   - name: EleutherAI/pythia-12b
     memory: 2.4e10
-    minibatch_size_per_device: 2
+    minibatch_size_per_device: 8
     lora_modules: *gpt_neox_modules
 
   - name: facebook/opt-350m
     memory: 6.6e8
-    lora_modules: *gpt_neox_modules
+    lora_modules: *opt_modules
+
+  - name: Qwen/Qwen1.5-0.5B
+    memory: 1.2e9
+    eval_batch_size: 8
+    lora_modules: *default_modules
+    custom_kwargs:
+      trust_remote_code: true
 
   - name: mistralai/Mistral-7B-v0.1
     memory: 1.5e10
@@ -96,17 +109,17 @@ models:
       trust_remote_code: true
       revision: 8be2854218fea9054331e217fd26a06f3fd02004
 
-  - name: meta-llama/Llama2-7b-hf
+  - name: meta-llama/Llama-2-7b-hf
     memory: 1.4e10
     eval_batch_size: 8
     lora_modules: *default_modules
 
-  - name: meta-llama/Llama2-13b-hf
+  - name: meta-llama/Llama-2-13b-hf
     memory: 2.6e10
     eval_batch_size: 8
     lora_modules: *default_modules
 
-  - name: meta-llama/Llama2-70b-hf
+  - name: meta-llama/Llama-2-70b-hf
     memory: 1.4e11
     eval_batch_size: 8
     lora_modules: *default_modules

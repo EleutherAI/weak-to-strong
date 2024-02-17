@@ -129,7 +129,7 @@ def main(
         del weak_model_config["strong_eval_every"]
         weak_model_config["gt_epochs"] = gt_epochs
         if use_default_lr:
-                lr = MODELS_DICT[weak_model_size].default_lr
+            lr = MODELS_DICT[weak_model_size].default_lr
 
         weak_model_config_name = get_config_foldername(weak_model_config)
 
