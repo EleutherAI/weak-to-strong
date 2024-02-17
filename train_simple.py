@@ -32,7 +32,7 @@ def main(
     n_test_docs: int = 10000,
     model_size: str = "gpt2",
     lr: Optional[float] = None,
-    # because we use kl loss which typically has smaller gradients, 
+    # because we use kl loss which typically has smaller gradients,
     # we optionally scale up the learning rate for w2s training
     w2s_lr_factor: float = 1.0,
     optim: Optional[str] = None,
@@ -63,8 +63,9 @@ def main(
     # non-positive values mean we don't save any checkpoints
     save_every: int = 1000000,
     sync_command: Optional[str] = None,
+    skip_inference: bool = False,
     skip_if_exists: bool = False,
-):  
+):
     assert (
         ds_name in VALID_DATASETS
     ), f"Unknown dataset {ds_name} not in {VALID_DATASETS}"
@@ -91,7 +92,7 @@ def main(
         lr = model_config.default_lr
         if is_w2s:
             lr *= w2s_lr_factor
-            
+
     if optim is None:
         optim = model_config.default_optimizer
 
@@ -160,7 +161,11 @@ def main(
         # split off half for getting weak labels
         split_data = train_dataset.train_test_split(test_size=n_train2_docs, seed=seed)
         train1_ds, train2_ds = split_data["train"], split_data["test"]
-        print("len(train1):", len(train1_ds), "len(train2):", len(train2_ds))
+        if skip_inference:
+            train2_ds = None
+            print("len(train1):", len(train1_ds), "(skipping inference)")
+        else:
+            print("len(train1):", len(train1_ds), "len(train2):", len(train2_ds))
         config_name = get_config_foldername(config)
     else:
         if not weak_labels_path.endswith("weak_labels"):

@@ -15,7 +15,7 @@ def main(
     weak_model_sizes: Optional[Union[List[str], str]] = None,
     strong_model_sizes: Optional[Union[List[str], str]] = None,
     train_self_to_self: bool = False,
-    **kwargs
+    **kwargs,
 ):
     """Sweep over model sizes and train weak-to-strong models.
     Can either:
@@ -47,9 +47,7 @@ def main(
         strong_model_sizes = split_model_sizes(strong_model_sizes)
         all_model_sizes = weak_model_sizes + strong_model_sizes
         weak_to_strong_model_sizes = [
-            (weak, strong)
-            for weak in weak_model_sizes
-            for strong in strong_model_sizes
+            (weak, strong) for weak in weak_model_sizes for strong in strong_model_sizes
         ]
     else:
         assert weak_model_sizes is None and strong_model_sizes is None
@@ -57,19 +55,22 @@ def main(
         weak_to_strong_model_sizes = [
             (model_sizes[i], model_sizes[j])
             for i in range(len(model_sizes))
-            for j in range(
-                i if train_self_to_self else i + 1,
-                len(model_sizes)
-            )
+            for j in range(i if train_self_to_self else i + 1, len(model_sizes))
         ]
 
     print("Running ground truth models")
     for model_size in all_model_sizes:
         print(f"Running ground truth {model_size}")
-        # try:
-        train_simple_main(model_size=model_size, **kwargs)
-        # except Exception as e:
-        #     print(f"Failed to run ground truth {model_size}: {e}")
+        # skip inference for models that are not weak
+        skip_inference = (
+            weak_model_sizes is not None and model_size not in weak_model_sizes
+        )
+        try:
+            train_simple_main(
+                model_size=model_size, skip_inference=skip_inference, **kwargs
+            )
+        except Exception as e:
+            print(f"Failed to run ground truth {model_size}: {e}")
 
     print("Running transfer models")
     for weak_model_size, strong_model_size in weak_to_strong_model_sizes:
