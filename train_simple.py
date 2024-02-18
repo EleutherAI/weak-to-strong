@@ -83,15 +83,18 @@ def main(
     if minibatch_size_per_device is None:
         minibatch_size_per_device = model_config.minibatch_size_per_device
 
-    use_default_lr = lr is None
-    if lr is None:
+    use_model_default_lr = lr is None
+    if use_model_default_lr:
         assert batch_size == 32, (
             "Learning rates were tuned on batch size 32, you probably want to sweep LR "
             "if you are tuning batch size"
         )
         lr = model_config.default_lr
-        if is_w2s:
-            lr *= w2s_lr_factor
+    if is_w2s:
+        lr = lr * w2s_lr_factor  # don't modify in place
+        print(
+            f"Using learning rate {lr} ({w2s_lr_factor}x the default) for w2s training"
+        )
 
     if optim is None:
         optim = model_config.default_optimizer
@@ -121,6 +124,7 @@ def main(
     }
     if is_w2s:
         config["strong_eval_every"] = w2s_eval_every
+        config["w2s_lr_factor"] = w2s_lr_factor
 
     if weak_model_size is not None:
         weak_model_config = config.copy()
@@ -128,9 +132,13 @@ def main(
         weak_model_config["loss"] = "xent"
         del weak_model_config["w2s_epochs"]
         del weak_model_config["strong_eval_every"]
+        del weak_model_config["w2s_lr_factor"]
         weak_model_config["gt_epochs"] = gt_epochs
-        if use_default_lr:
-            lr = MODELS_DICT[weak_model_size].default_lr
+        weak_model_config["lr"] = (
+            MODELS_DICT[weak_model_size].default_lr
+            if use_model_default_lr
+            else lr / w2s_lr_factor
+        )
 
         weak_model_config_name = get_config_foldername(weak_model_config)
 
