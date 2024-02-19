@@ -61,8 +61,8 @@ def main(
     w2s_eval_every: int = 10000000,
     # If set, this command will be run to sync the results to remote storage
     # non-positive values mean we don't save any checkpoints
-    save_every: int = 1000000,
     sync_command: Optional[str] = None,
+    save_every: int = 1000000,
     skip_inference: bool = False,
     skip_if_exists: bool = False,
 ):
