@@ -79,7 +79,7 @@ class ModelConfig:
         name: str,
         # memory, in bytes, of the model
         memory: float,
-        default_lr: float = 1e-5,
+        default_lr: float = 4e-5,
         eval_batch_size: int = 32,
         minibatch_size_per_device: Optional[int] = None,
         lora_modules: Optional[list[str]] = None,

@@ -33,7 +33,6 @@ lora_modules:
     - q_proj
     - v_proj
 
-# NOTE learning rates are not particularly tuned, work somewhat reasonably at train batch size 32
 models:
   - name: gpt2
     memory: 5.5e8
