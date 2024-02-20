@@ -56,14 +56,7 @@ class TransformerWithHead(PreTrainedModel):
             hidden_size = getattr(
                 config,
                 "word_embed_proj_dim",
-                getattr(
-                    config,
-                    "n_embd",
-                    getattr(
-                        config,
-                        "hidden_size",
-                        None)
-                )
+                getattr(config, "n_embd", getattr(config, "hidden_size", None)),
             )
             assert isinstance(hidden_size, int)
             self.score = torch.nn.Linear(hidden_size, self.num_labels, bias=False).to(
@@ -83,13 +76,15 @@ class TransformerWithHead(PreTrainedModel):
     @classmethod
     def from_pretrained(cls, name, **kwargs):
         return cls(name, **kwargs)
-    
-    def save_torch(self, path, optimizer=None, scheduler=None):
+
+    def save_torch(self, path, optimizer=None, scheduler=None, scaler=None):
         save_dict = self.state_dict()
         if optimizer is not None:
             save_dict["optimizer"] = optimizer.state_dict()
         if scheduler is not None:
             save_dict["scheduler"] = scheduler.state_dict()
+        if scaler is not None:
+            save_dict["scaler"] = scaler.state_dict()
         torch.save(save_dict, path)
 
     def gradient_checkpointing_enable(self):

@@ -6,7 +6,7 @@ import yaml
 from weak_to_strong.loss import logconf_loss_fn, product_loss_fn, xent_loss, kl_loss
 
 
-def load_config(config_path='configs/default.yaml'):
+def load_config(config_path="configs/default.yaml"):
     """
     Load the YAML configuration file.
 
@@ -17,7 +17,7 @@ def load_config(config_path='configs/default.yaml'):
     - dict: Configuration settings.
     """
     try:
-        with open(config_path, 'r') as file:
+        with open(config_path, "r") as file:
             config = yaml.safe_load(file)
         return config
     except Exception as e:
@@ -88,7 +88,7 @@ class ModelConfig:
         model_parallel: Optional[bool] = None,
         default_optimizer: str = "adam",
         torch_dtype: Optional[str] = None,
-    ):  
+    ):
         memory = float(memory)
         custom_kwargs = custom_kwargs or {}
         per_device_ram = torch.cuda.get_device_properties(0).total_memory
@@ -101,21 +101,26 @@ class ModelConfig:
                 "torch.bfloat16": torch.bfloat16,
             }[torch_dtype]
         else:
-            custom_kwargs["torch_dtype"] = torch.bfloat16
-        if not torch.cuda.is_bf16_supported() and custom_kwargs["torch_dtype"] == torch.bfloat16:
+            # by default, use float32
+            custom_kwargs["torch_dtype"] = torch.float32
+        if (
+            not torch.cuda.is_bf16_supported()
+            and custom_kwargs["torch_dtype"] == torch.bfloat16
+        ):
             custom_kwargs["torch_dtype"] = torch.float32
         self.name = name
-        memory_util_est = memory * self.MODEL_PARALLEL_FACTOR
+        memory_util_est = memory
         if custom_kwargs["torch_dtype"] == torch.float32:
             memory_util_est *= 2
-            
+
         if model_parallel is None:
             model_parallel = (
-                n_devices > 1 and
-                per_device_ram < self.MODEL_PARALLEL_FACTOR * memory
+                n_devices > 1
+                and per_device_ram < self.MODEL_PARALLEL_FACTOR * memory_util_est
             )
         if gradient_checkpointing is None:
-            gradient_checkpointing = memory > self.CHECKPOINTING_MEMORY
+            gradient_checkpointing = memory_util_est > self.CHECKPOINTING_MEMORY
+
         if minibatch_size_per_device is None:
             minibatch_size_per_device = eval_batch_size
         self.memory = memory

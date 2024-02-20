@@ -7,6 +7,7 @@ import datasets
 import numpy as np
 import torch
 import torch_optimizer as toptim
+from torch.cuda.amp import autocast, GradScaler
 from transformers.modeling_utils import load_sharded_checkpoint
 from sklearn.metrics import roc_auc_score
 from transformers import get_linear_schedule_with_warmup
@@ -20,13 +21,19 @@ from weak_to_strong.model import TransformerWithHead
 from weak_to_strong.config import ModelConfig
 
 
-def save(model: torch.nn.Module, save_path: Optional[str], optimizer=None, scheduler=None):
+def save(
+    model: torch.nn.Module,
+    save_path: Optional[str],
+    optimizer=None,
+    scheduler=None,
+    scaler=None,
+):
     assert save_path, "must provide save_path if save_every is not None"
     # Note: If the model is wrapped by DataParallel, we need to unwrap it before saving
     model_to_save = model.module if hasattr(model, "module") else model
 
     save_file = os.path.join(save_path, "pytorch_model.bin")
-    model_to_save.save_torch(save_file, optimizer, scheduler)
+    model_to_save.save_torch(save_file, optimizer, scheduler, scaler)
     print("saved torch weights", save_file)
 
 
@@ -56,10 +63,14 @@ def train_model(
     """
 
     print(
-        "LR", lr, 
-        "batch_size", batch_size, 
-        "minibatch_size", minibatch_size, 
-        "dataset", len(ds)
+        "LR",
+        lr,
+        "batch_size",
+        batch_size,
+        "minibatch_size",
+        minibatch_size,
+        "dataset",
+        len(ds),
     )
     assert (
         batch_size % minibatch_size == 0
@@ -100,6 +111,9 @@ def train_model(
         )
     else:
         lr_scheduler = torch.optim.lr_scheduler.LambdaLR(optimizer, lr_schedule_fn)
+
+    scaler = GradScaler(enabled=torch.cuda.get_device_properties(0).major >= 7)
+
     step = 0
     losses = []
     accuracies = []
@@ -132,38 +146,47 @@ def train_model(
                 logger.logkv("eval_accuracy", eval_acc)
                 wandb.log({"eval/accuracy": eval_acc})
             if save_every and (step + 1) % save_every == 0:
-                save(model, save_path, optimizer, lr_scheduler)
-            all_logits = []
-            all_labels = []
-            for mbatch in to_batch(
-                ds, minibatch_size, start=start, end=start + batch_size
-            ):
-                input_ids = (
-                    torch.nn.utils.rnn.pad_sequence(
-                        [torch.tensor(ids) for ids in mbatch["input_ids"]]  # type: ignore
-                    )
-                    .transpose(0, 1)
-                    .to(io_device)  # type: ignore
-                )
-                labels = torch.tensor(mbatch["soft_label"]).to(io_device)  # type: ignore
-                logits = model(
-                    input_ids, choice_input_ids=mbatch.get("choice_input_ids")
-                )
+                save(model, save_path, optimizer, lr_scheduler, scaler)
 
-                all_logits.extend(logits.to(io_device))
-                all_labels.extend(labels)
-            if len(all_logits) == 0:
-                # skip batches too small to form a single minibatch
-                continue
-            all_logits = torch.stack(all_logits)
-            all_labels = torch.stack(all_labels)
-            all_hard_labels = torch.argmax(all_labels, dim=1)
-            all_logprobs = torch.nn.functional.log_softmax(
-                all_logits.detach().float(), dim=1
-            )[:, 1]
-            loss = loss_fn(all_logits, all_labels, step_frac=step / nsteps)
-            loss_tot += loss.item()
-            loss.backward()
+            with autocast(enabled=scaler.is_enabled()):
+                all_logits = []
+                all_labels = []
+                for mbatch in to_batch(
+                    ds, minibatch_size, start=start, end=start + batch_size
+                ):
+                    input_ids = (
+                        torch.nn.utils.rnn.pad_sequence(
+                            [torch.tensor(ids) for ids in mbatch["input_ids"]]  # type: ignore
+                        )
+                        .transpose(0, 1)
+                        .to(io_device)  # type: ignore
+                    )
+                    labels = torch.tensor(mbatch["soft_label"]).to(io_device)  # type: ignore
+                    logits = model(
+                        input_ids, choice_input_ids=mbatch.get("choice_input_ids")
+                    )
+
+                    all_logits.extend(logits.to(io_device))
+                    all_labels.extend(labels)
+                if len(all_logits) == 0:
+                    # skip batches too small to form a single minibatch
+                    continue
+                all_logits = torch.stack(all_logits)
+                all_labels = torch.stack(all_labels)
+                all_hard_labels = torch.argmax(all_labels, dim=1)
+                all_logprobs = torch.nn.functional.log_softmax(
+                    all_logits.detach().float(), dim=1
+                )[:, 1]
+                loss = loss_fn(all_logits, all_labels, step_frac=step / nsteps)
+                loss_tot += loss.item()
+            scaler.scale(loss).backward()
+            scaler.unscale_(optimizer)
+            torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)
+            scaler.step(optimizer)
+            scaler.update()
+            optimizer.zero_grad()
+            lr_scheduler.step()
+
             losses.append(loss_tot)
             accuracies.append(
                 torch.mean(
@@ -181,18 +204,16 @@ def train_model(
             aurocs.append(auroc)
 
             log_dict = {
-                    "step": step,
-                    "progress": step / nsteps,
-                    "loss": loss_tot,
-                    "train_accuracy": accuracies[-1],
-                    "train_auroc": aurocs[-1],
-                    "lr": lr_scheduler.get_last_lr()[0],
+                "step": step,
+                "progress": step / nsteps,
+                "loss": loss_tot,
+                "train_accuracy": accuracies[-1],
+                "train_auroc": aurocs[-1],
+                "lr": lr_scheduler.get_last_lr()[0],
             }
             logger.logkvs(log_dict)
             wandb.log(log_dict)
-            optimizer.step()
-            optimizer.zero_grad()
-            lr_scheduler.step()
+
             if log_every and step % log_every == 0:
                 print(
                     f"Step: {step}/{nsteps}; loss: {np.mean(losses)}; "
@@ -216,7 +237,7 @@ def train_model(
         wandb.log({"eval/accuracy": eval_acc})
         logger.dumpkvs()
     if save_every:
-        save(model, save_path, optimizer, lr_scheduler)
+        save(model, save_path, optimizer, lr_scheduler, scaler)
     return final_eval_results
 
 
@@ -341,7 +362,6 @@ def train_and_save_model(
             save_every=save_every,
         )
         print("Model training took", time.time() - start, "seconds")
-            
 
     inference_results = None
     if inference_ds:

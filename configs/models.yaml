@@ -39,7 +39,6 @@ models:
     memory: 5.5e8
     default_lr: 5e-5
     lora_modules: *gpt2_modules
-    torch_dtype: torch.float32
 
   - name: gpt2-medium
     memory: 1.5e9
@@ -124,6 +123,7 @@ models:
 
   - name: EleutherAI/gpt-neo-2.7B
     memory: 5.5e9
+    torch_dtype: torch.float32
     lora_modules: *gpt_neo_modules
 
   - name: EleutherAI/gpt-j-6b
