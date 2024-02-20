@@ -47,6 +47,11 @@ class TransformerWithHead(PreTrainedModel):
             )
             self.lm = get_peft_model(self.lm, peft_config)
 
+            # cast LoRA parameters to float32
+            for p in self.lm.parameters():
+                if p.requires_grad:
+                    p.data = p.data.to(torch.float32)
+
         lm_head = getattr(self.lm, "lm_head", getattr(self.lm, "embed_out", None))
         assert isinstance(lm_head, torch.nn.Linear)
         if use_lm_head:

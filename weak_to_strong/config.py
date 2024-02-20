@@ -58,7 +58,10 @@ class ModelConfig:
         torch_dtype (str, optional):
             The torch data type. Defaults to None.
             If None and not set in custom_kwargs, then it defaults to
-            "torch.bfloat16".
+            "torch.bfloat16". We cast LoRA modules to fp32,
+            and our training script wraps model calls in autocast to avoid dtype issues,
+            and does not use gradscaling because we don't support fp16,
+            and stores optimizer buffers in fp32.
     """
 
     CHECKPOINTING_MEMORY = 3e9
@@ -97,21 +100,21 @@ class ModelConfig:
             assert custom_kwargs.get("torch_dtype") is None
             custom_kwargs["torch_dtype"] = {
                 "torch.float32": torch.float32,
-                "torch.float16": torch.float16,
                 "torch.bfloat16": torch.bfloat16,
             }[torch_dtype]
         else:
-            # by default, use float32
-            custom_kwargs["torch_dtype"] = torch.float32
+            custom_kwargs["torch_dtype"] = torch.bfloat16
         if (
-            not torch.cuda.is_bf16_supported()
-            and custom_kwargs["torch_dtype"] == torch.bfloat16
-        ):
+            not torch.cuda.is_bf16_supported() or lora_modules is None
+        ) and custom_kwargs[  # we enforce fp32 for full finetuning
+            "torch_dtype"
+        ] == torch.bfloat16:
             custom_kwargs["torch_dtype"] = torch.float32
         self.name = name
         memory_util_est = memory
         if custom_kwargs["torch_dtype"] == torch.float32:
             memory_util_est *= 2
+        # NOTE: this memory estimate doesn't account for the optimizer, LoRA, checkpointing, etc.
 
         if model_parallel is None:
             model_parallel = (

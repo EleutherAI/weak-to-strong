@@ -7,7 +7,7 @@ import datasets
 import numpy as np
 import torch
 import torch_optimizer as toptim
-from torch.cuda.amp import autocast, GradScaler
+from torch.cuda.amp import autocast
 from transformers.modeling_utils import load_sharded_checkpoint
 from sklearn.metrics import roc_auc_score
 from transformers import get_linear_schedule_with_warmup
@@ -112,8 +112,6 @@ def train_model(
     else:
         lr_scheduler = torch.optim.lr_scheduler.LambdaLR(optimizer, lr_schedule_fn)
 
-    scaler = GradScaler(enabled=torch.cuda.get_device_properties(0).major >= 7)
-
     step = 0
     losses = []
     accuracies = []
@@ -146,9 +144,9 @@ def train_model(
                 logger.logkv("eval_accuracy", eval_acc)
                 wandb.log({"eval/accuracy": eval_acc})
             if save_every and (step + 1) % save_every == 0:
-                save(model, save_path, optimizer, lr_scheduler, scaler)
+                save(model, save_path, optimizer, lr_scheduler)
 
-            with autocast(enabled=scaler.is_enabled()):
+            with autocast():
                 all_logits = []
                 all_labels = []
                 for mbatch in to_batch(
@@ -179,11 +177,10 @@ def train_model(
                 )[:, 1]
                 loss = loss_fn(all_logits, all_labels, step_frac=step / nsteps)
                 loss_tot += loss.item()
-            scaler.scale(loss).backward()
-            scaler.unscale_(optimizer)
+            # we don't need to use a gradscaler because we're using bf16 instead of fp16
+            loss.backward()
             torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)
-            scaler.step(optimizer)
-            scaler.update()
+            optimizer.step()
             optimizer.zero_grad()
             lr_scheduler.step()
 
@@ -237,7 +234,7 @@ def train_model(
         wandb.log({"eval/accuracy": eval_acc})
         logger.dumpkvs()
     if save_every:
-        save(model, save_path, optimizer, lr_scheduler, scaler)
+        save(model, save_path, optimizer, lr_scheduler)
     return final_eval_results
 
 

@@ -73,6 +73,8 @@ def main(
         weak_model_size is None or weak_labels_path is None
     ), "Can't pass both weak_model_size and weak_labels_path"
     model_config = MODELS_DICT[model_size]
+    if model_config.model_parallel:
+        print(f"Using model parallelism for {model_size}")
 
     is_w2s = weak_labels_path is not None or weak_model_size is not None
     eval_every = w2s_eval_every if is_w2s else 10000000
