@@ -7,7 +7,6 @@ import datasets
 import numpy as np
 import torch
 import torch_optimizer as toptim
-from torch.cuda.amp import autocast
 from transformers.modeling_utils import load_sharded_checkpoint
 from sklearn.metrics import roc_auc_score
 from transformers import get_linear_schedule_with_warmup
@@ -146,39 +145,39 @@ def train_model(
             if save_every and (step + 1) % save_every == 0:
                 save(model, save_path, optimizer, lr_scheduler)
 
-            with autocast():
-                all_logits = []
-                all_labels = []
-                for mbatch in to_batch(
-                    ds, minibatch_size, start=start, end=start + batch_size
-                ):
-                    input_ids = (
-                        torch.nn.utils.rnn.pad_sequence(
-                            [torch.tensor(ids) for ids in mbatch["input_ids"]]  # type: ignore
-                        )
-                        .transpose(0, 1)
-                        .to(io_device)  # type: ignore
+            all_logits = []
+            all_labels = []
+            for mbatch in to_batch(
+                ds, minibatch_size, start=start, end=start + batch_size
+            ):
+                input_ids = (
+                    torch.nn.utils.rnn.pad_sequence(
+                        [torch.tensor(ids) for ids in mbatch["input_ids"]]  # type: ignore
                     )
-                    labels = torch.tensor(mbatch["soft_label"]).to(io_device)  # type: ignore
-                    logits = model(
-                        input_ids, choice_input_ids=mbatch.get("choice_input_ids")
-                    )
-
-                    all_logits.extend(logits.to(io_device))
-                    all_labels.extend(labels)
-                if len(all_logits) == 0:
-                    # skip batches too small to form a single minibatch
-                    continue
-                all_logits = torch.stack(all_logits)
-                all_labels = torch.stack(all_labels)
-                all_hard_labels = torch.argmax(all_labels, dim=1)
-                all_logprobs = torch.nn.functional.log_softmax(
-                    all_logits.detach().float(), dim=1
-                )[:, 1]
-                loss = loss_fn(all_logits, all_labels, step_frac=step / nsteps)
+                    .transpose(0, 1)
+                    .to(io_device)  # type: ignore
+                )
+                labels = torch.tensor(mbatch["soft_label"]).to(io_device)  # type: ignore
+                logits = model(
+                    input_ids, choice_input_ids=mbatch.get("choice_input_ids")
+                ).to(io_device)
+                loss = loss_fn(logits, labels, step_frac=step / nsteps)
                 loss_tot += loss.item()
-            # we don't need to use a gradscaler because we're using bf16 instead of fp16
-            loss.backward()
+                # we don't need to use a gradscaler because we're using bf16 instead of fp16
+                loss.backward()
+
+                all_logits.extend(logits)
+                all_labels.extend(labels)
+
+            if len(all_logits) == 0:
+                # skip batches too small to form a single minibatch
+                continue
+            all_logits = torch.stack(all_logits)
+            all_labels = torch.stack(all_labels)
+            all_hard_labels = torch.argmax(all_labels, dim=1)
+            all_logprobs = torch.nn.functional.log_softmax(
+                all_logits.detach().float(), dim=1
+            )[:, 1]
             torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)
             optimizer.step()
             optimizer.zero_grad()
