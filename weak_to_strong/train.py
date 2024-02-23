@@ -20,12 +20,19 @@ from weak_to_strong.model import TransformerWithHead
 from weak_to_strong.config import ModelConfig
 
 
-def save(model: torch.nn.Module, save_path: str, optimizer=None, scheduler=None):
+def save(
+    model: torch.nn.Module,
+    save_path: Optional[str],
+    optimizer=None,
+    scheduler=None,
+    scaler=None,
+):
+    assert save_path, "must provide save_path if save_every is not None"
     # Note: If the model is wrapped by DataParallel, we need to unwrap it before saving
     model_to_save = model.module if hasattr(model, "module") else model
 
     save_file = os.path.join(save_path, "pytorch_model.bin")
-    model_to_save.save_torch(save_file, optimizer, scheduler)
+    model_to_save.save_torch(save_file, optimizer, scheduler, scaler)
     print("saved torch weights", save_file)
 
 
@@ -37,6 +44,7 @@ def train_model(
     loss_fn: Callable = kl_loss,
     log_every: int = 400,
     eval_every: Optional[int] = None,
+    save_every: Optional[int] = None,
     eval_batch_size: int = 256,
     minibatch_size: int = 8,
     eval_ds: Optional[datasets.Dataset] = None,
@@ -53,7 +61,16 @@ def train_model(
     - soft_label: a list of soft label probabilities
     """
 
-    print("LR", lr, "batch_size", batch_size, "minibatch_size", minibatch_size)
+    print(
+        "LR",
+        lr,
+        "batch_size",
+        batch_size,
+        "minibatch_size",
+        minibatch_size,
+        "dataset",
+        len(ds),
+    )
     assert (
         batch_size % minibatch_size == 0
     ), "batch size must be divisible by minibatch size"
@@ -93,6 +110,7 @@ def train_model(
         )
     else:
         lr_scheduler = torch.optim.lr_scheduler.LambdaLR(optimizer, lr_schedule_fn)
+
     step = 0
     losses = []
     accuracies = []
@@ -112,8 +130,6 @@ def train_model(
                     eval_ds is not None
                 ), "must provide eval_ds if eval_every is not None"
                 eval_results = eval_model_acc(model, eval_ds, eval_batch_size)
-                if save_path:
-                    save(model, save_path, optimizer, lr_scheduler)
                 if gradient_checkpointing:
                     (
                         model
@@ -126,6 +142,9 @@ def train_model(
                 eval_acc_dict[step] = eval_acc
                 logger.logkv("eval_accuracy", eval_acc)
                 wandb.log({"eval/accuracy": eval_acc})
+            if save_every and (step + 1) % save_every == 0:
+                save(model, save_path, optimizer, lr_scheduler)
+
             all_logits = []
             all_labels = []
             for mbatch in to_batch(
@@ -141,19 +160,29 @@ def train_model(
                 labels = torch.tensor(mbatch["soft_label"]).to(io_device)  # type: ignore
                 logits = model(
                     input_ids, choice_input_ids=mbatch.get("choice_input_ids")
-                )
+                ).to(io_device)
+                loss = loss_fn(logits, labels, step_frac=step / nsteps)
+                loss_tot += loss.item()
+                # we don't need to use a gradscaler because we're using bf16 instead of fp16
+                loss.backward()
 
-                all_logits.extend(logits.to(io_device))
+                all_logits.extend(logits)
                 all_labels.extend(labels)
+
+            if len(all_logits) == 0:
+                # skip batches too small to form a single minibatch
+                continue
             all_logits = torch.stack(all_logits)
             all_labels = torch.stack(all_labels)
             all_hard_labels = torch.argmax(all_labels, dim=1)
             all_logprobs = torch.nn.functional.log_softmax(
                 all_logits.detach().float(), dim=1
             )[:, 1]
-            loss = loss_fn(all_logits, all_labels, step_frac=step / nsteps)
-            loss_tot += loss.item()
-            loss.backward()
+            torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)
+            optimizer.step()
+            optimizer.zero_grad()
+            lr_scheduler.step()
+
             losses.append(loss_tot)
             accuracies.append(
                 torch.mean(
@@ -171,18 +200,16 @@ def train_model(
             aurocs.append(auroc)
 
             log_dict = {
-                    "step": step,
-                    "progress": step / nsteps,
-                    "loss": loss_tot,
-                    "train_accuracy": accuracies[-1],
-                    "train_auroc": aurocs[-1],
-                    "lr": lr_scheduler.get_last_lr()[0],
+                "step": step,
+                "progress": step / nsteps,
+                "loss": loss_tot,
+                "train_accuracy": accuracies[-1],
+                "train_auroc": aurocs[-1],
+                "lr": lr_scheduler.get_last_lr()[0],
             }
             logger.logkvs(log_dict)
             wandb.log(log_dict)
-            optimizer.step()
-            optimizer.zero_grad()
-            lr_scheduler.step()
+
             if log_every and step % log_every == 0:
                 print(
                     f"Step: {step}/{nsteps}; loss: {np.mean(losses)}; "
@@ -201,11 +228,11 @@ def train_model(
         print("Final evaluation:")
         assert eval_ds is not None, "must provide eval_ds if eval_every is not None"
         final_eval_results = eval_model_acc(model, eval_ds, eval_batch_size)
-        eval_acc = np.mean([r["acc"] for r in final_eval_results])
+        eval_acc = np.mean([r["acc"] for r in final_eval_results])  # type: ignore
         logger.logkv("eval_accuracy", eval_acc)
         wandb.log({"eval/accuracy": eval_acc})
         logger.dumpkvs()
-    if save_path:
+    if save_every:
         save(model, save_path, optimizer, lr_scheduler)
     return final_eval_results
 
@@ -229,6 +256,7 @@ def train_and_save_model(
     lr_schedule: str = "constant",
     optimizer_name: str = "adam",
     eval_every: Optional[int] = None,
+    save_every: Optional[int] = None,
 ) -> tuple:
     if eval_batch_size is None:
         eval_batch_size = batch_size
@@ -295,11 +323,14 @@ def train_and_save_model(
             minibatch_size = min(
                 minibatch_size_per_device * torch.cuda.device_count(), batch_size
             )
+            eval_batch_size = min(torch.cuda.device_count(), eval_batch_size)
             print(
                 "Using",
                 torch.cuda.device_count(),
                 "GPUs, setting minibatch_size to",
                 minibatch_size,
+                "and eval_batch_size to",
+                eval_batch_size,
             )
         else:
             minibatch_size = minibatch_size_per_device
@@ -324,14 +355,14 @@ def train_and_save_model(
             train_with_dropout=train_with_dropout,
             lr_schedule=lr_schedule,
             optimizer_name=optimizer_name,
+            save_every=save_every,
         )
         print("Model training took", time.time() - start, "seconds")
-            
 
     inference_results = None
     if inference_ds:
         inference_results = eval_model_acc(model, inference_ds, eval_batch_size)
-        inf_acc = np.mean([r["acc"] for r in inference_results])
+        inf_acc = np.mean([r["acc"] for r in inference_results])  # type: ignore
         logger.logkv("inference_accuracy", inf_acc)
         wandb.log({"inference/accuracy": inf_acc})
 

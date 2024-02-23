@@ -47,6 +47,11 @@ class TransformerWithHead(PreTrainedModel):
             )
             self.lm = get_peft_model(self.lm, peft_config)
 
+            # cast LoRA parameters to float32
+            for p in self.lm.parameters():
+                if p.requires_grad:
+                    p.data = p.data.to(torch.float32)
+
         lm_head = getattr(self.lm, "lm_head", getattr(self.lm, "embed_out", None))
         assert isinstance(lm_head, torch.nn.Linear)
         if use_lm_head:
@@ -54,7 +59,9 @@ class TransformerWithHead(PreTrainedModel):
             self.score = None
         else:
             hidden_size = getattr(
-                config, "n_embd", getattr(config, "hidden_size", None)
+                config,
+                "word_embed_proj_dim",
+                getattr(config, "n_embd", getattr(config, "hidden_size", None)),
             )
             assert isinstance(hidden_size, int)
             self.score = torch.nn.Linear(hidden_size, self.num_labels, bias=False).to(
@@ -74,13 +81,15 @@ class TransformerWithHead(PreTrainedModel):
     @classmethod
     def from_pretrained(cls, name, **kwargs):
         return cls(name, **kwargs)
-    
-    def save_torch(self, path, optimizer=None, scheduler=None):
+
+    def save_torch(self, path, optimizer=None, scheduler=None, scaler=None):
         save_dict = self.state_dict()
         if optimizer is not None:
             save_dict["optimizer"] = optimizer.state_dict()
         if scheduler is not None:
             save_dict["scheduler"] = scheduler.state_dict()
+        if scaler is not None:
+            save_dict["scaler"] = scaler.state_dict()
         torch.save(save_dict, path)
 
     def gradient_checkpointing_enable(self):

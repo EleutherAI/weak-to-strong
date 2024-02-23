@@ -1,27 +1,43 @@
 lora_modules:
-  gpt_neox: &gpt_neox_modules
-    - dense_h_to_4h
-    - dense_4h_to_h
-    - query_key_value
-  gpt2: &gpt2_modules
-    - c_fc
-    - c_proj
-    - c_attn
-  mistralai: &mistralai_modules
+  default: &llama_mistral_qwen_modules
     - up_proj
     - down_proj
     - gate_proj
     - k_proj
     - q_proj
     - v_proj
+  gpt_neox_bloom: &gpt_neox_bloom_modules
+    - dense_h_to_4h
+    - dense_4h_to_h
+    - query_key_value
+  gpt_neo: &gpt_neo_modules
+    - c_fc
+    - c_proj
+    - k_proj
+    - q_proj
+    - v_proj
+  gptj: &gptj_modules
+    - fc_in
+    - fc_out
+    - q_proj
+    - k_proj
+    - v_proj
+  gpt2: &gpt2_modules
+    - c_fc
+    - c_proj
+    - c_attn
+  opt: &opt_modules
+    - fc1
+    - fc2
+    - k_proj
+    - q_proj
+    - v_proj
 
-# NOTE learning rates are not particularly tuned, work somewhat reasonably at train batch size 32
 models:
   - name: gpt2
     memory: 5.5e8
     default_lr: 5e-5
     lora_modules: *gpt2_modules
-    torch_dtype: torch.float32
 
   - name: gpt2-medium
     memory: 1.5e9
@@ -34,57 +50,188 @@ models:
 
   - name: gpt2-xl
     memory: 6.43e9
-    eval_batch_size: 2
+    eval_batch_size: 8
     lora_modules: *gpt2_modules
 
   - name: EleutherAI/pythia-14m
     memory: 5.3e7
-    lora_modules: *gpt_neox_modules
+    lora_modules: *gpt_neox_bloom_modules
 
   - name: EleutherAI/pythia-70m
     memory: 1.66e8
-    lora_modules: *gpt_neox_modules
+    lora_modules: *gpt_neox_bloom_modules
 
   - name: EleutherAI/pythia-160m-v0
     memory: 3.75e8
-    lora_modules: *gpt_neox_modules
+    lora_modules: *gpt_neox_bloom_modules
 
   - name: EleutherAI/pythia-410m
     memory: 9.11e8
-    lora_modules: *gpt_neox_modules
+    lora_modules: *gpt_neox_bloom_modules
+
+  - name: EleutherAI/pythia-1b
+    memory: 2.2e9
+    lora_modules: *gpt_neox_bloom_modules
+
+  - name: EleutherAI/pythia-1.4b
+    memory: 2.9e9
+    lora_modules: *gpt_neox_bloom_modules
 
   - name: EleutherAI/pythia-2.8b
     memory: 5.68e9
-    minibatch_size_per_device: 2
-    lora_modules: *gpt_neox_modules
+    minibatch_size_per_device: 8
+    lora_modules: *gpt_neox_bloom_modules
+
+  - name: EleutherAI/pythia-6.9b
+    memory: 5.68e9
+    minibatch_size_per_device: 8
+    lora_modules: *gpt_neox_bloom_modules
 
   - name: EleutherAI/pythia-12b
     memory: 2.4e10
-    minibatch_size_per_device: 2
-    lora_modules: *gpt_neox_modules
+    minibatch_size_per_device: 8
+    lora_modules: *gpt_neox_bloom_modules
+
+  - name: facebook/opt-350m
+    memory: 6.6e8
+    lora_modules: *opt_modules
+
+  - name: facebook/opt-2.7b
+    memory: 5.5e9
+    lora_modules: *opt_modules
+
+  - name: facebook/opt-6.7b
+    memory: 1.4e10
+    lora_modules: *opt_modules
+
+  - name: facebook/opt-13b
+    memory: 2.6e10
+    lora_modules: *opt_modules
+
+  - name: facebook/opt-30b
+    memory: 6.5e10
+    lora_modules: *opt_modules
+
+  - name: bigscience/bloom-3b
+    memory: 6.5e9
+    lora_modules: *gpt_neox_bloom_modules
+
+  - name: bigscience/bloom-7b1
+    memory: 1.4e10
+    lora_modules: *gpt_neox_bloom_modules
+
+  - name: EleutherAI/gpt-neo-2.7B
+    memory: 5.5e9
+    torch_dtype: torch.float32
+    lora_modules: *gpt_neo_modules
+
+  - name: EleutherAI/gpt-j-6b
+    memory: 1.4e10
+    lora_modules: *gptj_modules
+
+  - name: EleutherAI/gpt-neox-20b
+    memory: 4.3e10
+    lora_modules: *gpt_neox_bloom_modules
+
+  - name: Qwen/Qwen1.5-0.5B
+    memory: 1.2e9
+    eval_batch_size: 8
+    lora_modules: *llama_mistral_qwen_modules
+    custom_kwargs:
+      trust_remote_code: true
+
+  - name: Qwen/Qwen1.5-1.8B
+    memory: 3.67e9
+    eval_batch_size: 8
+    lora_modules: *llama_mistral_qwen_modules
+    custom_kwargs:
+      trust_remote_code: true
+
+  - name: Qwen/Qwen1.5-4B
+    memory: 8.5e9
+    eval_batch_size: 8
+    lora_modules: *llama_mistral_qwen_modules
+    custom_kwargs:
+      trust_remote_code: true
+
+  - name: Qwen/Qwen1.5-7B
+    memory: 1.6e10
+    eval_batch_size: 8
+    lora_modules: *llama_mistral_qwen_modules
+    custom_kwargs:
+      trust_remote_code: true
+
+  - name: Qwen/Qwen1.5-14B
+    memory: 3e10
+    eval_batch_size: 8
+    lora_modules: *llama_mistral_qwen_modules
+    custom_kwargs:
+      trust_remote_code: true
+
+  - name: stabilityai/stablelm-base-alpha-7b
+    memory: 1.4e10
+    lora_modules: *gpt_neox_bloom_modules
 
   - name: mistralai/Mistral-7B-v0.1
     memory: 1.5e10
-    eval_batch_size: 2
-    lora_modules: *mistralai_modules
+    eval_batch_size: 8
+    lora_modules: *llama_mistral_qwen_modules
 
   - name: Qwen/Qwen-1_8B
     memory: 3.67e9
-    eval_batch_size: 2
+    eval_batch_size: 8
+    lora_modules: *llama_mistral_qwen_modules
     custom_kwargs:
       trust_remote_code: true
       revision: 5fde88dff770a7d036847211f5d9d9705f0caa69
 
   - name: Qwen/Qwen-7B
     memory: 1.6e10
-    eval_batch_size: 2
+    eval_batch_size: 8
+    lora_modules: *llama_mistral_qwen_modules
     custom_kwargs:
       trust_remote_code: true
       revision: d4efd21e866b9cb3466cb65b963933f5e98016d1
 
   - name: Qwen/Qwen-14B
     memory: 3e10
-    eval_batch_size: 2
+    eval_batch_size: 8
+    lora_modules: *llama_mistral_qwen_modules
     custom_kwargs:
       trust_remote_code: true
       revision: 8be2854218fea9054331e217fd26a06f3fd02004
+
+  - name: meta-llama/Llama-2-7b-hf
+    memory: 1.4e10
+    eval_batch_size: 8
+    lora_modules: *llama_mistral_qwen_modules
+
+  - name: meta-llama/Llama-2-13b-hf
+    memory: 2.6e10
+    eval_batch_size: 8
+    lora_modules: *llama_mistral_qwen_modules
+
+  - name: meta-llama/Llama-2-70b-hf
+    memory: 1.4e11
+    eval_batch_size: 8
+    lora_modules: *llama_mistral_qwen_modules
+
+  - name: huggyllama/llama-7b
+    memory: 1.4e10
+    eval_batch_size: 8
+    lora_modules: *llama_mistral_qwen_modules
+
+  - name: huggyllama/llama-13b
+    memory: 2.6e10
+    eval_batch_size: 8
+    lora_modules: *llama_mistral_qwen_modules
+
+  - name: huggyllama/llama-30b
+    memory: 6.5e10
+    eval_batch_size: 8
+    lora_modules: *llama_mistral_qwen_modules
+
+  - name: huggyllama/llama-65b
+    memory: 1.3e11
+    eval_batch_size: 8
+    lora_modules: *llama_mistral_qwen_modules

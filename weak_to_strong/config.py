@@ -6,7 +6,7 @@ import yaml
 from weak_to_strong.loss import logconf_loss_fn, product_loss_fn, xent_loss, kl_loss
 
 
-def load_config(config_path='configs/default.yaml'):
+def load_config(config_path="configs/default.yaml"):
     """
     Load the YAML configuration file.
 
@@ -17,7 +17,7 @@ def load_config(config_path='configs/default.yaml'):
     - dict: Configuration settings.
     """
     try:
-        with open(config_path, 'r') as file:
+        with open(config_path, "r") as file:
             config = yaml.safe_load(file)
         return config
     except Exception as e:
@@ -58,7 +58,10 @@ class ModelConfig:
         torch_dtype (str, optional):
             The torch data type. Defaults to None.
             If None and not set in custom_kwargs, then it defaults to
-            "torch.bfloat16".
+            "torch.bfloat16". We cast LoRA modules to fp32,
+            and our training script wraps model calls in autocast to avoid dtype issues,
+            and does not use gradscaling because we don't support fp16,
+            and stores optimizer buffers in fp32.
     """
 
     CHECKPOINTING_MEMORY = 3e9
@@ -73,13 +76,13 @@ class ModelConfig:
     gradient_checkpointing: bool
     model_parallel: bool
     default_optimizer: str
-    torch_dtype: str
 
     def __init__(
         self,
         name: str,
+        # memory, in bytes, of the model
         memory: float,
-        default_lr: float = 1e-5,
+        default_lr: float = 4e-5,
         eval_batch_size: int = 32,
         minibatch_size_per_device: Optional[int] = None,
         lora_modules: Optional[list[str]] = None,
@@ -89,28 +92,40 @@ class ModelConfig:
         default_optimizer: str = "adam",
         torch_dtype: Optional[str] = None,
     ):
+        memory = float(memory)
         custom_kwargs = custom_kwargs or {}
         per_device_ram = torch.cuda.get_device_properties(0).total_memory
         n_devices = torch.cuda.device_count()
-        if model_parallel is None:
-            model_parallel = (
-                n_devices > 1 and
-                per_device_ram < self.MODEL_PARALLEL_FACTOR * memory
-            )
-        if gradient_checkpointing is None:
-            gradient_checkpointing = memory > self.CHECKPOINTING_MEMORY
-        if minibatch_size_per_device is None:
-            minibatch_size_per_device = eval_batch_size
         if torch_dtype is not None:
             assert custom_kwargs.get("torch_dtype") is None
-            custom_kwargs["torch_dtype"] = torch_dtype
-        elif custom_kwargs.get("torch_dtype") is not None:
-            torch_dtype = custom_kwargs["torch_dtype"]
+            custom_kwargs["torch_dtype"] = {
+                "torch.float32": torch.float32,
+                "torch.bfloat16": torch.bfloat16,
+            }[torch_dtype]
         else:
-            torch_dtype = "torch.bfloat16"
-        if not torch.cuda.is_bf16_supported():
-            custom_kwargs["torch_dtype"] = "torch.float32"
+            custom_kwargs["torch_dtype"] = torch.bfloat16
+        if (
+            not torch.cuda.is_bf16_supported() or lora_modules is None
+        ) and custom_kwargs[  # we enforce fp32 for full finetuning
+            "torch_dtype"
+        ] == torch.bfloat16:
+            custom_kwargs["torch_dtype"] = torch.float32
         self.name = name
+        memory_util_est = memory
+        if custom_kwargs["torch_dtype"] == torch.float32:
+            memory_util_est *= 2
+        # NOTE: this memory estimate doesn't account for the optimizer, LoRA, checkpointing, etc.
+
+        if model_parallel is None:
+            model_parallel = (
+                n_devices > 1
+                and per_device_ram < self.MODEL_PARALLEL_FACTOR * memory_util_est
+            )
+        if gradient_checkpointing is None:
+            gradient_checkpointing = memory_util_est > self.CHECKPOINTING_MEMORY
+
+        if minibatch_size_per_device is None:
+            minibatch_size_per_device = eval_batch_size
         self.memory = memory
         self.default_lr = default_lr
         self.eval_batch_size = eval_batch_size
@@ -120,7 +135,6 @@ class ModelConfig:
         self.gradient_checkpointing = gradient_checkpointing
         self.model_parallel = model_parallel
         self.default_optimizer = default_optimizer
-        self.torch_dtype = torch_dtype  # type: ignore
 
 
 MODELS_DICT: dict[str, ModelConfig] = {
