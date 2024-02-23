@@ -14,11 +14,9 @@ def wandb_finish(sweep: bool = False):
 
 def to_batch(x, batch_size: int, start: int = 0, end: int | None = None):
     """Helper function to split a dataset into batches,
-    with the last batch being smaller if necessary."""
-    end = end if end is not None else len(x)
-    for i in range(start, end, batch_size):
-        if i >= len(x):
-            return
+    skipping the last partial batch"""
+    end = min(end, len(x)) if end is not None else len(x)
+    for i in range(start, end - batch_size + 1, batch_size):
         yield x[i : i + batch_size]
 
 

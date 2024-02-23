@@ -32,6 +32,9 @@ def main(
     n_test_docs: int = 10000,
     model_size: str = "gpt2",
     lr: Optional[float] = None,
+    # because we use kl loss which typically has smaller gradients,
+    # we optionally scale up the learning rate for w2s training
+    w2s_lr_factor: float = 1.0,
     optim: Optional[str] = None,
     gt_epochs: int = 1,
     w2s_epochs: int = 1,
@@ -58,7 +61,10 @@ def main(
     w2s_eval_every: int = 10000000,
     w2s_log_every: int = 100,
     # If set, this command will be run to sync the results to remote storage
+    # non-positive values mean we don't save any checkpoints
     sync_command: Optional[str] = None,
+    save_every: int = 1000000,
+    skip_inference: bool = False,
     skip_if_exists: bool = False,
 ):
     assert (
@@ -68,6 +74,8 @@ def main(
         weak_model_size is None or weak_labels_path is None
     ), "Can't pass both weak_model_size and weak_labels_path"
     model_config = MODELS_DICT[model_size]
+    if model_config.model_parallel:
+        print(f"Using model parallelism for {model_size}")
 
     is_w2s = weak_labels_path is not None or weak_model_size is not None
     eval_every = w2s_eval_every if is_w2s else 10000000
@@ -75,14 +83,22 @@ def main(
     epochs = w2s_epochs if is_w2s else gt_epochs
     loss = loss if is_w2s else "xent"
 
-    use_default_lr = False
-    if lr is None:
+    # this is per device!
+    if minibatch_size_per_device is None:
+        minibatch_size_per_device = model_config.minibatch_size_per_device
+
+    use_model_default_lr = lr is None
+    if use_model_default_lr:
         assert batch_size == 32, (
             "Learning rates were tuned on batch size 32, you probably want to sweep LR "
             "if you are tuning batch size"
         )
         lr = model_config.default_lr
-        use_default_lr = True
+    if is_w2s:
+        lr = lr * w2s_lr_factor  # don't modify in place
+        print(
+            f"Using learning rate {lr} ({w2s_lr_factor}x the default) for w2s training"
+        )
 
     if optim is None:
         optim = model_config.default_optimizer
@@ -107,10 +123,12 @@ def main(
         # "results_folder": results_folder,
         "linear_probe": linear_probe,
         "lr_schedule": lr_schedule,
+        # "save_every": save_every,
         # "sweep_subfolder": sweep_subfolder,
     }
     if is_w2s:
         config["strong_eval_every"] = w2s_eval_every
+        config["w2s_lr_factor"] = w2s_lr_factor
 
     if weak_model_size is not None:
         weak_model_config = config.copy()
@@ -118,9 +136,13 @@ def main(
         weak_model_config["loss"] = "xent"
         del weak_model_config["w2s_epochs"]
         del weak_model_config["strong_eval_every"]
+        del weak_model_config["w2s_lr_factor"]
         weak_model_config["gt_epochs"] = gt_epochs
-        if use_default_lr:
-            weak_model_config["lr"] = MODELS_DICT[weak_model_size].default_lr
+        weak_model_config["lr"] = (
+            MODELS_DICT[weak_model_size].default_lr
+            if use_model_default_lr
+            else lr / w2s_lr_factor
+        )
 
         weak_model_config_name = get_config_foldername(weak_model_config)
 
@@ -151,7 +173,11 @@ def main(
         # split off half for getting weak labels
         split_data = train_dataset.train_test_split(test_size=n_train2_docs, seed=seed)
         train1_ds, train2_ds = split_data["train"], split_data["test"]
-        print("len(train1):", len(train1_ds), "len(train2):", len(train2_ds))
+        if skip_inference:
+            train2_ds = None
+            print("len(train1):", len(train1_ds), "(skipping inference)")
+        else:
+            print("len(train1):", len(train1_ds), "len(train2):", len(train2_ds))
         config_name = get_config_foldername(config)
     else:
         if not weak_labels_path.endswith("weak_labels"):
@@ -229,6 +255,7 @@ def main(
         lr_schedule=lr_schedule,
         optimizer_name=optim,
         eval_every=eval_every,
+        save_every=save_every,
         log_every=log_every,
     )
 

@@ -3,6 +3,7 @@ import datasets
 import numpy as np
 import torch
 from torch import nn
+from torch.cuda.amp import autocast
 from sklearn.metrics import roc_auc_score
 from weak_to_strong.common import clear_mem, to_batch
 
@@ -43,12 +44,13 @@ def eval_model_acc(
                 [torch.tensor(ex) for ex in batch["input_ids"]], batch_first=True
             ).to(model.device if hasattr(model, "device") else "cpu")
             labels = batch["soft_label"]
-            # run forward pass
-            raw_logits = model(
-                input_ids, choice_input_ids=batch.get("choice_input_ids")
-            )
+            with autocast():
+                # run forward pass
+                raw_logits = model(
+                    input_ids, choice_input_ids=batch.get("choice_input_ids")
+                )
 
-            raw_logprobs = torch.nn.functional.log_softmax(raw_logits, dim=-1)
+                raw_logprobs = torch.nn.functional.log_softmax(raw_logits, dim=-1)
             logprobs = unpack(raw_logprobs)
             probs = unpack(raw_logprobs.exp())
             logits = unpack(raw_logits)
@@ -126,13 +128,10 @@ def eval_model_accuracy_loss(
     total_accuracy = None
     n_batches = 0
     for start in range(0, len(ds), batch_size):
-        for mbatch in to_batch(
-            ds, minibatch_size, start=start, end=start + batch_size
-        ):
+        for mbatch in to_batch(ds, minibatch_size, start=start, end=start + batch_size):
             # pad input_ids to common length
             input_ids = torch.nn.utils.rnn.pad_sequence(
-                [torch.tensor(ex) for ex in mbatch["input_ids"]],
-                batch_first=True
+                [torch.tensor(ex) for ex in mbatch["input_ids"]], batch_first=True
             ).to(device=io_device)
             # run forward pass
             raw_logits = model(

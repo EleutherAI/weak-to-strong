@@ -3,9 +3,12 @@ from dataclasses import dataclass
 from random import Random
 from typing import Any, Callable, Optional
 
-from datasets import Dataset as HfDataset
-from datasets import load_dataset as hf_load_dataset
-from datasets import concatenate_datasets
+from datasets import (
+    Dataset as HfDataset,
+    DatasetDict as HfDatasetDict,
+    load_dataset as hf_load_dataset,
+    concatenate_datasets,
+)
 
 from collections import Counter
 
@@ -32,17 +35,23 @@ def balance(ds: HfDataset, seed: int):
 
     label_counts = Counter(ds["hard_label"])
     assert len(label_counts) == 2, "Dataset must be binary"
-    
+
     # undersample the majority class
     majority_label = max(label_counts, key=lambda k: label_counts[k])
     minority_label = 1 - majority_label
     minority_count = label_counts[minority_label]
     minority_ds = ds.filter(lambda ex: ex["hard_label"] == minority_label)
-    majority_ds = ds.filter(lambda ex: ex["hard_label"] == majority_label).shuffle(seed=seed).select(range(minority_count))
+    majority_ds = (
+        ds.filter(lambda ex: ex["hard_label"] == majority_label)
+        .shuffle(seed=seed)
+        .select(range(minority_count))
+    )
     return concatenate_datasets([minority_ds, majority_ds]).shuffle(seed=seed)
 
 
-def load_and_process_dataset(ds_name: str, seed: int = 0, split_sizes: Optional[dict] = None):
+def load_and_process_dataset(
+    ds_name: str, seed: int = 0, split_sizes: Optional[dict] = None
+):
     if split_sizes is None:
         split_sizes = dict(train=None, test=None)
 
@@ -54,9 +63,12 @@ def load_and_process_dataset(ds_name: str, seed: int = 0, split_sizes: Optional[
         ds = cfg.loader(split)
         try:
             ds = ds.select(range(n_docs))
-        except IndexError as e:
+        except IndexError:
             print(f"Warning {ds_name} has less than {n_docs} docs, using all {len(ds)}")
-        ds = balance(ds.map(functools.partial(cfg.formatter, rng=Random(seed))), seed)  # type: ignore
+        ds = balance(
+            ds.map(functools.partial(cfg.formatter, rng=Random(seed))),  # type: ignore
+            seed,
+        )
         ds = ds.map(
             lambda ex: {
                 "soft_label": [1 - float(ex["hard_label"]), float(ex["hard_label"])]
@@ -67,22 +79,28 @@ def load_and_process_dataset(ds_name: str, seed: int = 0, split_sizes: Optional[
     return results
 
 
-warned_about_choices = set()    
+warned_about_choices = set()
+
+
 def encode_choice(text, tokenizer):
     global warned_about_choices
-     
+
     c_ids = tokenizer.encode(text, add_special_tokens=False)
 
     # some tokenizers split off the leading whitespace character
     if tokenizer.decode(c_ids[0]).strip() == "":
         c_ids = c_ids[1:]
         assert c_ids == tokenizer.encode(text.lstrip(), add_special_tokens=False)
-    
+
     c_ids = tuple(c_ids)
     if len(c_ids) != 1 and c_ids not in warned_about_choices:
-        assert c_ids[0] not in [c[0] for c in warned_about_choices], "Choice shares first token with another choice"
+        assert c_ids[0] not in [
+            c[0] for c in warned_about_choices
+        ], "Choice shares first token with another choice"
         warned_about_choices.add(c_ids)
-        print(f"Warning: Only the first token of multitoken choice \"{text}\" will be used")
+        print(
+            f'Warning: Only the first token of multitoken choice "{text}" will be used'
+        )
     return c_ids[0]
 
 
@@ -113,20 +131,37 @@ def tokenize_dataset(
         if "choices" in ex:
             choice_toks = [encode_choice(c, tokenizer) for c in ex["choices"]]
             out["choice_input_ids"] = choice_toks
-        
-        return out
 
+        return out
 
     ds = raw_ds.map(process_function, batched=False)
     pre_len = len(ds)
     ds = ds.filter(lambda x: len(x["input_ids"]) < max_ctx)
-    print(f"Filtered {100 * (1 - len(ds) / pre_len):.2f}% of examples for being too long")
+    print(
+        f"Filtered {100 * (1 - len(ds) / pre_len):.2f}% of examples for being too long"
+    )
     return ds
 
 
-def hf_loader(*hf_name, split_names=None):
+def hf_loader(*hf_name, split_names=None, n_test=None):
+    """
+    If `split_names` is provided, it maps from the requested
+    split name to the actual name in the hugginface dataset.
+    If `n_test` is provided, it will concatenate all splits together
+    and then take a deterministic test set of size `n_test` from it.
+    """
+    if n_test is not None:
+        assert split_names is None
+        ds = hf_load_dataset(*hf_name)
+        if isinstance(ds, HfDatasetDict):
+            ds = concatenate_datasets(ds.values())  # type: ignore
+        assert isinstance(ds, HfDataset)
+        splits = ds.train_test_split(test_size=n_test, seed=0)
+        return lambda split: splits[split]
+
     if split_names is None:
         split_names = dict()
+
     return lambda split: hf_load_dataset(*hf_name, split=split_names.get(split, split))
 
 
@@ -139,13 +174,17 @@ def format_mc_taco(ex, rng):
     template = "{sentence}\n\nGiven the above, {question} Is the answer {answer}?"
     return dict(txt=template.format(**ex), hard_label=ex["label"])
 
+
 register_dataset(
     "mc_taco",
     DatasetConfig(  # we switch train and test bc test is bigger
-        loader=hf_loader("mc_taco", split_names=dict(train="test", test="validation")),  # type: ignore
+        loader=hf_loader(  # type: ignore
+            "mc_taco", split_names=dict(train="test", test="validation")
+        ),
         formatter=format_mc_taco,  # type: ignore
     ),
 )
+
 
 def format_amazon_polarity(ex, rng):
     return dict(txt=f"{ex['title']} {ex['content']}", hard_label=ex["label"])
@@ -159,6 +198,8 @@ register_dataset(
     ),
 )
 
+SCIQ_N_TEST = 3000
+
 
 def format_sciq(ex, rng):
     hard_label = int(rng.random() < 0.5)
@@ -166,13 +207,17 @@ def format_sciq(ex, rng):
         ans = ex["correct_answer"]
     else:
         ans = rng.choice([ex["distractor1"], ex["distractor2"], ex["distractor3"]])
-    
+
     txt = f"Q: {ex['question']} A: {ans}"
     return dict(txt=txt, hard_label=hard_label)
 
+
 register_dataset(
     "sciq",
-    DatasetConfig(loader=hf_loader("sciq"), formatter=format_sciq),  # type: ignore
+    DatasetConfig(
+        loader=hf_loader("sciq", n_test=SCIQ_N_TEST),  # type: ignore
+        formatter=format_sciq,  # type: ignore
+    ),
 )
 
 
@@ -187,15 +232,22 @@ def format_sciq_for_lm_head(ex, rng):
     choices = (" No", " Yes")
     return dict(txt=txt, hard_label=hard_label, choices=choices)
 
+
 register_dataset(
     "sciq_for_lm_head",
-    DatasetConfig(loader=hf_loader("sciq"), formatter=format_sciq_for_lm_head),  # type: ignore
+    DatasetConfig(
+        loader=hf_loader("sciq", n_test=SCIQ_N_TEST),  # type: ignore
+        formatter=format_sciq_for_lm_head,  # type: ignore
+    ),
 )
 
 
 def format_sciq_for_lm_head_with_support(ex, rng):
     # from https://github.com/EleutherAI/elk-generalization
-    template = "Name: Bob\n\nPassage 1:\n{support}\n\nQ1: \"{question}\" Is the answer \"{answer}\"?\nA:"
+    template = (
+        "Name: Bob\n\nPassage 1:\n{support}\n\nQ1: "
+        '"{question}" Is the answer "{answer}"?\nA:'
+    )
     choices = (" No", " Yes")
     hard_label = int(rng.random() < 0.5)
     if hard_label:
@@ -205,15 +257,19 @@ def format_sciq_for_lm_head_with_support(ex, rng):
     txt = template.format(support=ex["support"], question=ex["question"], answer=ans)
     return dict(txt=txt, hard_label=hard_label, choices=choices)
 
+
 register_dataset(
     "sciq_for_lm_head_with_support",
-    DatasetConfig(loader=hf_loader("sciq"), formatter=format_sciq_for_lm_head_with_support),  # type: ignore
+    DatasetConfig(
+        loader=hf_loader("sciq", n_test=SCIQ_N_TEST),  # type: ignore
+        formatter=format_sciq_for_lm_head_with_support,  # type: ignore
+    ),
 )
 
 
 def format_sciq_with_support(ex, rng):
     # from https://github.com/EleutherAI/elk-generalization
-    template = "Name: Bob\n\nPassage 1:\n{support}\n\nQ1: \"{question}\" Is the answer \"{answer}\"?"
+    template = 'Name: Bob\n\nPassage 1:\n{support}\n\nQ1: "{question}" Is the answer "{answer}"?'
     hard_label = int(rng.random() < 0.5)
     if hard_label:
         ans = ex["correct_answer"]
@@ -222,9 +278,13 @@ def format_sciq_with_support(ex, rng):
     txt = template.format(support=ex["support"], question=ex["question"], answer=ans)
     return dict(txt=txt, hard_label=hard_label)
 
+
 register_dataset(
     "sciq_with_support",
-    DatasetConfig(loader=hf_loader("sciq"), formatter=format_sciq_with_support),  # type: ignore
+    DatasetConfig(
+        loader=hf_loader("sciq", n_test=SCIQ_N_TEST),  # type: ignore
+        formatter=format_sciq_with_support,  # type: ignore
+    ),
 )
 
 

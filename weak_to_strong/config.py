@@ -1,6 +1,7 @@
 import torch
-from dataclasses import dataclass
 from typing import Optional
+
+import yaml
 
 from weak_to_strong.loss import logconf_loss_fn, product_loss_fn, xent_loss, kl_loss
 from weak_to_strong.model import TransformerWithHead
@@ -8,50 +9,145 @@ from weak_to_strong.model import TransformerWithHead
 MODEL_TYPE = TransformerWithHead | torch.nn.DataParallel[TransformerWithHead]
 
 
-@dataclass
-class ModelConfig:
-    """Configuration for a model used in LORA finetuning.
-    Arguments:
-        name: str
-            The name of the model, e.g. "gpt2", "gpt2-medium", etc.
-        default_lr: float
-            The default learning rate for the model.
-        eval_batch_size: int
-            The batch size to use for evaluation.
-        minibatch_size_per_device: Optional[int]
-            The minibatch size per device to use for training. 
-            If None, the default is 1.
-        lora_modules: Optional[list[str]]
-            The LoRA modules to use for the model. 
-            If None, the default is None.
-        custom_kwargs: Optional[dict]
-            Custom keyword arguments to pass to the model. 
-            If None, the default is None.
-        gradient_checkpointing: bool
-            Whether to use gradient checkpointing. The default is False.
-        model_parallel: bool
-            Whether to use model parallel. The default is False.
-        default_optimizer: str
-            The default optimizer to use for the model. The default is "adam".
+def load_config(config_path="configs/default.yaml"):
     """
+    Load the YAML configuration file.
+
+    Parameters:
+    - config_path (str): Path to the YAML configuration file.
+
+    Returns:
+    - dict: Configuration settings.
+    """
+    try:
+        with open(config_path, "r") as file:
+            config = yaml.safe_load(file)
+        return config
+    except Exception as e:
+        print(f"Error loading the config file {config_path}: {e}")
+        return {}
+
+
+class ModelConfig:
+    """
+    Configuration class for the model.
+
+    Args:
+        name (str): The name of the model.
+        memory (float):
+            The memory required for the model in bytes.
+        default_lr (float, optional):
+            The default learning rate. Defaults to 1e-5.
+        eval_batch_size (int, optional):
+            The batch size for evaluation. Defaults to 32.
+        minibatch_size_per_device (int, optional):
+            The minibatch size per device. Defaults to None.
+        lora_modules (list[str], optional):
+            The list of LORA modules. Defaults to None.
+            If None, then LORA is not used.
+        custom_kwargs (dict, optional):
+            Arguments to pass to HF's from_pretrained(). Defaults to None.
+        gradient_checkpointing (bool, optional):
+            Whether to use gradient checkpointing. Defaults to None.
+        model_parallel (bool, optional):
+            Whether to use model parallelism.
+            Defaults to true if the memory requirement exceeds a threshold and
+            there are multiple GPUs available.
+            Model parallelism uses accelerate's automatic model sharding,
+            while if model-parallel is false and you're using multiple GPUs,
+            then it uses data parallelism.
+        default_optimizer (str, optional):
+            The default optimizer. Defaults to "adam".
+        torch_dtype (str, optional):
+            The torch data type. Defaults to None.
+            If None and not set in custom_kwargs, then it defaults to
+            "torch.bfloat16". We cast LoRA modules to fp32,
+            and our training script wraps model calls in autocast to avoid dtype issues,
+            and does not use gradscaling because we don't support fp16,
+            and stores optimizer buffers in fp32.
+    """
+
+    CHECKPOINTING_MEMORY = 3e9
+    MODEL_PARALLEL_FACTOR = 2
     name: str
+    memory: float
     default_lr: float
     eval_batch_size: int
-    minibatch_size_per_device: Optional[int] = None
-    lora_modules: Optional[list[str]] = None
-    custom_kwargs: Optional[dict] = None
-    gradient_checkpointing: bool = False
-    model_parallel: bool = False
-    default_optimizer: str = "adam"
+    minibatch_size_per_device: int
+    lora_modules: Optional[list[str]]
+    custom_kwargs: dict
+    gradient_checkpointing: bool
+    model_parallel: bool
+    default_optimizer: str
+
+    def __init__(
+        self,
+        name: str,
+        # memory, in bytes, of the model
+        memory: float,
+        default_lr: float = 4e-5,
+        eval_batch_size: int = 32,
+        minibatch_size_per_device: Optional[int] = None,
+        lora_modules: Optional[list[str]] = None,
+        custom_kwargs: Optional[dict] = None,
+        gradient_checkpointing: Optional[bool] = None,
+        model_parallel: Optional[bool] = None,
+        default_optimizer: str = "adam",
+        torch_dtype: Optional[str] = None,
+    ):
+        memory = float(memory)
+        custom_kwargs = custom_kwargs or {}
+        per_device_ram = torch.cuda.get_device_properties(0).total_memory
+        n_devices = torch.cuda.device_count()
+        if torch_dtype is not None:
+            assert custom_kwargs.get("torch_dtype") is None
+            custom_kwargs["torch_dtype"] = {
+                "torch.float32": torch.float32,
+                "torch.bfloat16": torch.bfloat16,
+            }[torch_dtype]
+        else:
+            custom_kwargs["torch_dtype"] = torch.bfloat16
+        if (
+            not torch.cuda.is_bf16_supported() or lora_modules is None
+        ) and custom_kwargs[  # we enforce fp32 for full finetuning
+            "torch_dtype"
+        ] == torch.bfloat16:
+            custom_kwargs["torch_dtype"] = torch.float32
+        self.name = name
+        memory_util_est = memory
+        if custom_kwargs["torch_dtype"] == torch.float32:
+            memory_util_est *= 2
+        # NOTE: this memory estimate doesn't account for the optimizer, LoRA, checkpointing, etc.
+
+        if model_parallel is None:
+            model_parallel = (
+                n_devices > 1
+                and per_device_ram < self.MODEL_PARALLEL_FACTOR * memory_util_est
+            )
+        if gradient_checkpointing is None:
+            gradient_checkpointing = memory_util_est > self.CHECKPOINTING_MEMORY
+
+        if minibatch_size_per_device is None:
+            minibatch_size_per_device = eval_batch_size
+        self.memory = memory
+        self.default_lr = default_lr
+        self.eval_batch_size = eval_batch_size
+        self.minibatch_size_per_device = minibatch_size_per_device
+        self.lora_modules = lora_modules
+        self.custom_kwargs = custom_kwargs
+        self.gradient_checkpointing = gradient_checkpointing
+        self.model_parallel = model_parallel
+        self.default_optimizer = default_optimizer
 
     def load_model(
         self,
         batch_size: int,
         use_lm_head: bool,
+        eval_batch_size: int,
         minibatch_size_per_device: Optional[int] = None,
         num_labels: int = 2,
         linear_probe: bool = False,
-    ) -> tuple[MODEL_TYPE, int]:
+    ) -> tuple[MODEL_TYPE, int, int]:
         custom_kwargs = self.custom_kwargs or {}
         if minibatch_size_per_device is None:
             minibatch_size_per_device = self.minibatch_size_per_device or 1
@@ -85,239 +181,25 @@ class ModelConfig:
             if torch.cuda.device_count() > 1:
                 model = torch.nn.DataParallel(model, output_device=0)
                 minibatch_size = min(
-                    minibatch_size_per_device * torch.cuda.device_count(), 
-                    batch_size
+                    minibatch_size_per_device * torch.cuda.device_count(), batch_size
                 )
+                eval_batch_size = min(torch.cuda.device_count(), eval_batch_size)
                 print(
                     "Using",
                     torch.cuda.device_count(),
                     "GPUs, setting minibatch_size to",
                     minibatch_size,
+                    "and eval_batch_size to",
+                    eval_batch_size,
                 )
             else:
                 minibatch_size = minibatch_size_per_device
-        return model, minibatch_size
+        return model, minibatch_size, eval_batch_size
 
 
-GPT_NEOX_LORA_MODULES = ["dense_h_to_4h", "dense_4h_to_h", "query_key_value"]
-GPT2_LORA_MODULES = ["c_fc", "c_proj", "c_attn"]
-QWEN_LORA_MODULES = [
-    "up_proj",
-    "down_proj",
-    "gate_proj",
-    "k_proj",
-    "q_proj",
-    "v_proj",
-]
-QWEN1_5_KWARGS = {
-    "trust_remote_code": True,
-    "torch_dtype": torch.bfloat16 if torch.cuda.is_bf16_supported() else torch.float32,
-}
-per_device_ram = torch.cuda.get_device_properties(0).total_memory
-
-# NOTE learning rates are not particularly tuned, work somewhat reasonably at train batch size 32
-MODEL_CONFIGS = [
-    ModelConfig(
-        name="gpt2",
-        default_lr=5e-5,
-        eval_batch_size=32,
-        lora_modules=GPT2_LORA_MODULES,
-    ),
-    ModelConfig(
-        name="gpt2-medium",
-        default_lr=5e-5,
-        eval_batch_size=32,
-        lora_modules=GPT2_LORA_MODULES,
-        minibatch_size_per_device=1,
-        custom_kwargs={
-            "torch_dtype": torch.bfloat16
-            if torch.cuda.is_bf16_supported()
-            else torch.float32  # we can only do this because we're using LoRA
-        },
-        gradient_checkpointing=True,
-    ),
-    ModelConfig(
-        name="gpt2-large",
-        default_lr=1e-5,
-        eval_batch_size=32,
-        lora_modules=GPT2_LORA_MODULES,
-    ),
-    ModelConfig(
-        name="gpt2-xl",
-        default_lr=1e-5,
-        eval_batch_size=2,
-        gradient_checkpointing=True,
-        lora_modules=GPT2_LORA_MODULES,
-        # Should use model_parallel on V100s (note: ironically if you have a single V100
-        # it should run, but if you have multiple it won't run without model_parallel
-        # because of the overhead of data parallel training).
-        model_parallel=(per_device_ram < 35e9 and torch.cuda.device_count() > 1),
-    ),
-    ModelConfig(
-        name="EleutherAI/pythia-70m",
-        default_lr=1e-5,
-        eval_batch_size=32,
-        minibatch_size_per_device=32,  # this needs adjusting for GPU/dataset
-        model_parallel=False,
-        lora_modules=GPT_NEOX_LORA_MODULES,
-    ),
-    ModelConfig(
-        name="EleutherAI/pythia-14m",
-        default_lr=1e-5,
-        eval_batch_size=32,
-        minibatch_size_per_device=32,  # this needs adjusting for GPU/dataset
-        model_parallel=False,
-        lora_modules=GPT_NEOX_LORA_MODULES,
-    ),
-    ModelConfig(
-        name="EleutherAI/pythia-160m-v0",
-        default_lr=1e-5,
-        eval_batch_size=32,
-        minibatch_size_per_device=32,  # this needs adjusting for GPU/dataset
-        model_parallel=False,
-        lora_modules=GPT_NEOX_LORA_MODULES,
-    ),
-    ModelConfig(
-        name="EleutherAI/pythia-410m",
-        default_lr=1e-5,
-        eval_batch_size=32,
-        minibatch_size_per_device=32,  # this needs adjusting for GPU/dataset
-        model_parallel=False,
-        lora_modules=GPT_NEOX_LORA_MODULES,
-    ),
-    ModelConfig(
-        name="EleutherAI/pythia-1.4b",
-        default_lr=1e-5,
-        eval_batch_size=32,
-        minibatch_size_per_device=1,  # this needs adjusting for GPU/dataset
-        model_parallel=False,
-        lora_modules=GPT_NEOX_LORA_MODULES,
-        custom_kwargs={
-            "torch_dtype": torch.bfloat16
-            if torch.cuda.is_bf16_supported()
-            else torch.float32  # we can only do this because we're using LoRA
-        },
-        gradient_checkpointing=True,
-    ),
-    ModelConfig(
-        name="EleutherAI/pythia-2.8b",
-        default_lr=1e-5,
-        eval_batch_size=32,
-        minibatch_size_per_device=2,  # this needs adjusting for GPU/dataset
-        model_parallel=False,
-        lora_modules=GPT_NEOX_LORA_MODULES,
-        custom_kwargs={
-            "torch_dtype": torch.bfloat16
-            if torch.cuda.is_bf16_supported()
-            else torch.float32  # we can only do this because we're using LoRA
-        },
-    ),
-    ModelConfig(
-        name="EleutherAI/pythia-12b",
-        default_lr=1e-5,
-        eval_batch_size=32,
-        minibatch_size_per_device=2,  # this needs adjusting for GPU/dataset
-        model_parallel=False,
-        lora_modules=GPT_NEOX_LORA_MODULES,
-        custom_kwargs={
-            "torch_dtype": torch.bfloat16
-            if torch.cuda.is_bf16_supported()
-            else torch.float32  # we can only do this because we're using LoRA
-        },
-    ),
-    ModelConfig(
-        name="mistralai/Mistral-7B-v0.1",
-        default_lr=1e-5,
-        eval_batch_size=2,
-        lora_modules=[
-            "up_proj",
-            "down_proj",
-            "gate_proj",
-            "k_proj",
-            "q_proj",
-            "v_proj",
-        ],
-        minibatch_size_per_device=1,  # this needs adjusting for GPU/dataset
-        gradient_checkpointing=True,
-        model_parallel=True,
-        custom_kwargs={
-            "torch_dtype": torch.bfloat16  # we can only do this because we're using LoRA
-            if torch.cuda.is_bf16_supported()
-            else torch.float32,
-        },
-    ),
-    ModelConfig(
-        name="Qwen/Qwen1.5-0.5B",
-        default_lr=1e-5,
-        eval_batch_size=32,
-        minibatch_size_per_device=32,
-        lora_modules=QWEN_LORA_MODULES,
-        gradient_checkpointing=True,
-        model_parallel=False,
-        custom_kwargs=QWEN1_5_KWARGS,
-    ),
-    ModelConfig(
-        name="Qwen/Qwen-1_8B",
-        default_lr=1e-5,
-        eval_batch_size=32,
-        minibatch_size_per_device=1,
-        gradient_checkpointing=True,
-        model_parallel=(per_device_ram < 35e9 and torch.cuda.device_count() > 1),
-        custom_kwargs={
-            "trust_remote_code": True,
-            "bf16": torch.cuda.is_bf16_supported(),
-            "fp32": not torch.cuda.is_bf16_supported(),
-            "revision": "5fde88dff770a7d036847211f5d9d9705f0caa69",
-        },
-    ),
-    ModelConfig(
-        name="Qwen/Qwen-7B",
-        default_lr=1e-5,
-        eval_batch_size=2,
-        gradient_checkpointing=True,
-        model_parallel=True,
-        # note: you will probably not be able to run this without many gpus
-        custom_kwargs={
-            "trust_remote_code": True,
-            "bf16": torch.cuda.is_bf16_supported(),
-            "fp32": not torch.cuda.is_bf16_supported(),
-            "revision": "d4efd21e866b9cb3466cb65b963933f5e98016d1",
-        },
-    ),
-    ModelConfig(
-        name="Qwen/Qwen-14B",
-        default_lr=1e-5,
-        eval_batch_size=2,
-        gradient_checkpointing=True,
-        model_parallel=True,
-        # note: you will probably not be able to run this bf16 support and without many gpus
-        custom_kwargs={
-            "trust_remote_code": True,
-            "bf16": torch.cuda.is_bf16_supported(),
-            "fp32": not torch.cuda.is_bf16_supported(),
-            "revision": "8be2854218fea9054331e217fd26a06f3fd02004",
-        },
-    ),
-    ModelConfig(
-        name="Qwen/Qwen-72B",
-        default_lr=1e-5,
-        eval_batch_size=1,
-        gradient_checkpointing=True,
-        model_parallel=True,
-        # note: you will probably not be able to run this without bf16 support and many gpus
-        custom_kwargs={
-            "trust_remote_code": True,
-            "bf16": torch.cuda.is_bf16_supported(),
-            "fp32": not torch.cuda.is_bf16_supported(),
-            "revision": "fec78c0e3b3b10dd9f0ce775c34a686a3255a7d1",
-        },
-        # This model is really big, save space by using adafactor.
-        # Note that even then it will take up ~60GB per GPU on an 8-GPU machine.
-        default_optimizer="adafactor",
-    ),
-]
 MODELS_DICT: dict[str, ModelConfig] = {
-    model_config.name: model_config for model_config in MODEL_CONFIGS
+    cfg["name"]: ModelConfig(**cfg)
+    for cfg in load_config("configs/models.yaml")["models"]
 }
 
 

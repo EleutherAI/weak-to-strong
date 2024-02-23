@@ -29,7 +29,7 @@ def main(
     linear_probe: bool = False,
     store: bool = False,
     verbose: bool = False,
-    **kwargs
+    **kwargs,
 ) -> tuple[torch.Tensor, torch.Tensor]:
     """Evaluate the task vector arithmetic on ground truth labels.
     Uses arithmetic
@@ -92,22 +92,24 @@ def main(
         )
         config = {}
         config.update(kwargs)
-        config.update({
-            "coef_best": coef_best,
-            "coef_final": coef_final,
-            "model_size": model_size,
-            "weak_model_size": weak_model_size,
-            "ds_name": ds_name,
-            "w2s_eval_every": w2s_eval_every,
-            "seed": seed,
-            "max_ctx": max_ctx,
-            "n_train1_docs": n_train1_docs,
-            "n_train2_docs": n_train2_docs,
-            "n_test_docs": n_test_docs,
-            "linear_probe": linear_probe,
-            "store": store,
-            "verbose": verbose,
-        })
+        config.update(
+            {
+                "coef_best": coef_best,
+                "coef_final": coef_final,
+                "model_size": model_size,
+                "weak_model_size": weak_model_size,
+                "ds_name": ds_name,
+                "w2s_eval_every": w2s_eval_every,
+                "seed": seed,
+                "max_ctx": max_ctx,
+                "n_train1_docs": n_train1_docs,
+                "n_train2_docs": n_train2_docs,
+                "n_test_docs": n_test_docs,
+                "linear_probe": linear_probe,
+                "store": store,
+                "verbose": verbose,
+            }
+        )
         wandb_name = (
             f"evaluate_task_vector_model_{model_size.split('/')[-1]}_"
             f"weak_{weak_model_size}_"
@@ -130,15 +132,11 @@ def main(
     assert coef_best is not None
     assert coef_final is not None
     coef_best_float = (
-        coef_best.item()
-        if isinstance(coef_best, torch.Tensor)
-        else coef_best
+        coef_best.item() if isinstance(coef_best, torch.Tensor) else coef_best
     )
     coef_best_str = f"{coef_best_float:.1f}".replace(".", "_")
     coef_final_float = (
-        coef_final.item()
-        if isinstance(coef_final, torch.Tensor)
-        else coef_final
+        coef_final.item() if isinstance(coef_final, torch.Tensor) else coef_final
     )
     coef_final_str = f"{coef_final_float:.1f}".replace(".", "_")
     # Train weak model on ground truth
@@ -178,10 +176,7 @@ def main(
     dataset = load_and_process_dataset(
         ds_name,
         seed=seed,
-        split_sizes=dict(
-            train=n_train1_docs + n_train2_docs,
-            test=n_test_docs
-        ),
+        split_sizes=dict(train=n_train1_docs + n_train2_docs, test=n_test_docs),
     )
     test_ds = dataset["test"]  # type: ignore
     tokenizer = get_tokenizer(model_config.name)
@@ -191,9 +186,10 @@ def main(
 
     if verbose:
         print(f"Loading model {model_size}")
-    model, minibatch_size = model_config.load_model(
+    model, minibatch_size, eval_batch_size = model_config.load_model(
         batch_size=eval_batch_size,
         use_lm_head=use_lm_head,
+        eval_batch_size=eval_batch_size,
         linear_probe=linear_probe,
     )
     model.requires_grad_(False)  # training complete
