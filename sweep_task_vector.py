@@ -14,8 +14,9 @@ def main(
     sweep_method: str = "bayes",
     sweep_steps: int = 1,
     task_seed: int = 0,
-    **kwargs
+    **kwargs,
 ):
+    kwargs["skip_if_exists"] = True
     torch.manual_seed(task_seed)
     wandb_name = (
         f"model_{kwargs.get('model_size', 'default').split('/')[-1]}_"
@@ -34,16 +35,8 @@ def main(
         },
     }
     sweep_id = wandb.sweep(sweep=sweep_configuration, project="weak-to-strong")
-    evaluate_task_vector_main(
-        coef_best=1,
-        coef_final=0,
-        **kwargs
-    )
-    evaluate_task_vector_main(
-        coef_best=0,
-        coef_final=1,
-        **kwargs
-    )
+    evaluate_task_vector_main(coef_best=1, coef_final=0, **kwargs)
+    evaluate_task_vector_main(coef_best=0, coef_final=1, **kwargs)
     wandb.agent(
         sweep_id,
         lambda: evaluate_task_vector_main(**kwargs),
