@@ -50,7 +50,6 @@ models:
 
   - name: gpt2-xl
     memory: 6.43e9
-    eval_batch_size: 8
     lora_modules: *gpt2_modules
 
   - name: EleutherAI/pythia-14m
@@ -79,17 +78,15 @@ models:
 
   - name: EleutherAI/pythia-2.8b
     memory: 5.68e9
-    minibatch_size_per_device: 8
     lora_modules: *gpt_neox_bloom_modules
 
   - name: EleutherAI/pythia-6.9b
     memory: 5.68e9
-    minibatch_size_per_device: 8
     lora_modules: *gpt_neox_bloom_modules
 
   - name: EleutherAI/pythia-12b
     memory: 2.4e10
-    minibatch_size_per_device: 8
+    eval_batch_size: 8
     lora_modules: *gpt_neox_bloom_modules
 
   - name: facebook/opt-350m
@@ -110,6 +107,7 @@ models:
 
   - name: facebook/opt-30b
     memory: 6.5e10
+    eval_batch_size: 8
     lora_modules: *opt_modules
 
   - name: bigscience/bloom-3b
@@ -118,6 +116,7 @@ models:
 
   - name: bigscience/bloom-7b1
     memory: 1.4e10
+    eval_batch_size: 8
     lora_modules: *gpt_neox_bloom_modules
 
   - name: EleutherAI/gpt-neo-2.7B
@@ -131,11 +130,11 @@ models:
 
   - name: EleutherAI/gpt-neox-20b
     memory: 4.3e10
+    eval_batch_size: 8
     lora_modules: *gpt_neox_bloom_modules
 
   - name: Qwen/Qwen1.5-0.5B
     memory: 1.2e9
-    eval_batch_size: 8
     lora_modules: *llama_mistral_qwen_modules
     custom_kwargs:
       trust_remote_code: true

@@ -13,7 +13,7 @@ from transformers import get_linear_schedule_with_warmup
 import wandb
 
 import weak_to_strong.logger as logger
-from weak_to_strong.common import clear_mem, to_batch
+from weak_to_strong.common import to_batch, get_gpu_mem_used
 from weak_to_strong.eval import eval_model_acc
 from weak_to_strong.loss import kl_loss
 from weak_to_strong.model import TransformerWithHead
@@ -68,7 +68,7 @@ def train_model(
         batch_size,
         "minibatch_size",
         minibatch_size,
-        "dataset",
+        "dataset length",
         len(ds),
     )
     assert (
@@ -248,7 +248,7 @@ def train_and_save_model(
     epochs: int,
     save_path: str,
     eval_batch_size: Optional[int] = None,
-    minibatch_size_per_device: Optional[int] = None,
+    minibatch_size_per_replica: Optional[int] = None,
     loss_fn: Callable = kl_loss,
     force_retrain: bool = False,
     train_with_dropout: bool = False,
@@ -261,14 +261,16 @@ def train_and_save_model(
     if eval_batch_size is None:
         eval_batch_size = batch_size
 
-    if minibatch_size_per_device is None:
-        minibatch_size_per_device = 1
+    if minibatch_size_per_replica is None:
+        minibatch_size_per_replica = 1
 
     # if the dataset has a "choice_input_ids" field, we use the LM head
     use_lm_head = "choice_input_ids" in train_ds.features
 
     gradient_checkpointing = model_config.gradient_checkpointing
     custom_kwargs = model_config.custom_kwargs or {}
+
+    print(f"{get_gpu_mem_used() * 100:.2f}% of all GPU memory in use before training")
 
     def maybe_load_model(model):
         if os.path.exists(os.path.join(save_path, "results.pkl")) and not force_retrain:
@@ -303,8 +305,7 @@ def train_and_save_model(
             **custom_kwargs,
         )
         already_trained = maybe_load_model(model)
-        # slight misnomer, more like minibatch_size_per_dp_replica
-        minibatch_size = minibatch_size_per_device
+        minibatch_size = minibatch_size_per_replica
     else:
         model = TransformerWithHead.from_pretrained(
             model_config.name,
@@ -321,7 +322,7 @@ def train_and_save_model(
         if torch.cuda.device_count() > 1:
             model = torch.nn.DataParallel(model, output_device=0)
             minibatch_size = min(
-                minibatch_size_per_device * torch.cuda.device_count(), batch_size
+                minibatch_size_per_replica * torch.cuda.device_count(), batch_size
             )
             eval_batch_size = min(torch.cuda.device_count(), eval_batch_size)
             print(
@@ -333,7 +334,7 @@ def train_and_save_model(
                 eval_batch_size,
             )
         else:
-            minibatch_size = minibatch_size_per_device
+            minibatch_size = minibatch_size_per_replica
 
     if already_trained:
         test_results = eval_model_acc(model, test_ds, eval_batch_size)
@@ -385,8 +386,6 @@ def train_and_save_model(
                 },
                 f,
             )
-    # try to clean up memory
-    clear_mem()
     logger.shutdown()
     wandb.finish()
 

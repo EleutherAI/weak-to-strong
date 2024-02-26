@@ -37,7 +37,7 @@ class ModelConfig:
             The default learning rate. Defaults to 1e-5.
         eval_batch_size (int, optional):
             The batch size for evaluation. Defaults to 32.
-        minibatch_size_per_device (int, optional):
+        minibatch_size_per_replica (int, optional):
             The minibatch size per device. Defaults to None.
         lora_modules (list[str], optional):
             The list of LORA modules. Defaults to None.
@@ -70,7 +70,7 @@ class ModelConfig:
     memory: float
     default_lr: float
     eval_batch_size: int
-    minibatch_size_per_device: int
+    minibatch_size_per_replica: int
     lora_modules: Optional[list[str]]
     custom_kwargs: dict
     gradient_checkpointing: bool
@@ -84,7 +84,7 @@ class ModelConfig:
         memory: float,
         default_lr: float = 4e-5,
         eval_batch_size: int = 32,
-        minibatch_size_per_device: Optional[int] = None,
+        minibatch_size_per_replica: Optional[int] = None,
         lora_modules: Optional[list[str]] = None,
         custom_kwargs: Optional[dict] = None,
         gradient_checkpointing: Optional[bool] = None,
@@ -124,12 +124,12 @@ class ModelConfig:
         if gradient_checkpointing is None:
             gradient_checkpointing = memory_util_est > self.CHECKPOINTING_MEMORY
 
-        if minibatch_size_per_device is None:
-            minibatch_size_per_device = eval_batch_size
+        if minibatch_size_per_replica is None:
+            minibatch_size_per_replica = eval_batch_size
         self.memory = memory
         self.default_lr = default_lr
         self.eval_batch_size = eval_batch_size
-        self.minibatch_size_per_device = minibatch_size_per_device
+        self.minibatch_size_per_replica = minibatch_size_per_replica
         self.lora_modules = lora_modules
         self.custom_kwargs = custom_kwargs
         self.gradient_checkpointing = gradient_checkpointing

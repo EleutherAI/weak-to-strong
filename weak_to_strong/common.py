@@ -3,6 +3,8 @@ import gc
 import torch
 from transformers import AutoTokenizer
 
+import pynvml
+
 
 def to_batch(x, batch_size: int, start: int = 0, end: int | None = None):
     """Helper function to split a dataset into batches,
@@ -55,3 +57,18 @@ def clear_mem(verbose: bool = False):
         for obj in gc.get_objects():
             if torch.is_tensor(obj) or torch.is_tensor(try_attr(obj, "data")):
                 print(type(obj), obj.size(), obj.dtype)
+
+
+def get_gpu_mem_used() -> float:
+    """returns proportion of used GPU memory averaged across all GPUs"""
+    prop_sum = 0
+    pynvml.nvmlInit()
+    try:
+        num_devices = pynvml.nvmlDeviceGetCount()
+        for i in range(num_devices):
+            handle = pynvml.nvmlDeviceGetHandleByIndex(i)
+            meminfo = pynvml.nvmlDeviceGetMemoryInfo(handle)
+            prop_sum += int(meminfo.used) / int(meminfo.total)
+    finally:
+        pynvml.nvmlShutdown()
+    return prop_sum / num_devices
