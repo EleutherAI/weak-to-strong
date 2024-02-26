@@ -13,7 +13,7 @@ from transformers import get_linear_schedule_with_warmup
 import wandb
 
 import weak_to_strong.logger as logger
-from weak_to_strong.common import clear_mem, to_batch, wandb_finish
+from weak_to_strong.common import to_batch, wandb_finish, get_gpu_mem_used
 from weak_to_strong.eval import eval_model_acc, extract_accuracy
 from weak_to_strong.loss import kl_loss
 from weak_to_strong.config import ModelConfig
@@ -63,7 +63,7 @@ def train_model(
         batch_size,
         "minibatch_size",
         minibatch_size,
-        "dataset",
+        "dataset length",
         len(ds),
     )
     assert (
@@ -247,7 +247,7 @@ def train_and_save_model(
     epochs: int,
     save_path: str,
     eval_batch_size: Optional[int] = None,
-    minibatch_size_per_device: Optional[int] = None,
+    minibatch_size_per_replica: Optional[int] = None,
     loss_fn: Callable = kl_loss,
     force_retrain: bool = False,
     train_with_dropout: bool = False,
@@ -261,14 +261,16 @@ def train_and_save_model(
     if eval_batch_size is None:
         eval_batch_size = batch_size
 
-    if minibatch_size_per_device is None:
-        minibatch_size_per_device = 1
+    if minibatch_size_per_replica is None:
+        minibatch_size_per_replica = 1
 
     # if the dataset has a "choice_input_ids" field, we use the LM head
     use_lm_head = "choice_input_ids" in train_ds.features
 
     gradient_checkpointing = model_config.gradient_checkpointing
     custom_kwargs = model_config.custom_kwargs or {}
+
+    print(f"{get_gpu_mem_used() * 100:.2f}% of all GPU memory in use before training")
 
     def maybe_load_model(model):
         pkl_path = os.path.join(save_path, "results.pkl")
@@ -295,7 +297,7 @@ def train_and_save_model(
         use_lm_head=use_lm_head,
         eval_batch_size=eval_batch_size,
         linear_probe=linear_probe,
-        minibatch_size_per_device=minibatch_size_per_device,
+        minibatch_size_per_device=minibatch_size_per_replica,
     )
     already_trained = maybe_load_model(model)
 
@@ -352,8 +354,6 @@ def train_and_save_model(
                 },
                 f,
             )
-    # try to clean up memory
-    clear_mem()
     logger.shutdown()
     wandb_finish()
 

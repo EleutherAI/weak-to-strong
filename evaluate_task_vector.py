@@ -65,8 +65,6 @@ def main(
             Whether to store the results.
         verbose: bool
             Whether to print verbose output.
-        force_init: bool
-            Whether to force wandb initialization.
         **kwargs: dict
             Other arguments to pass to train_simple_main.
     Returns:

@@ -10,7 +10,7 @@ from datasets import load_from_disk
 import wandb
 
 import weak_to_strong.logger as logger
-from weak_to_strong.common import get_tokenizer
+from weak_to_strong.common import get_tokenizer, clear_mem, get_gpu_mem_used
 from weak_to_strong.config import MODELS_DICT, get_config_foldername, loss_dict
 from weak_to_strong.datasets import (
     VALID_DATASETS,
@@ -41,7 +41,7 @@ def main(
     force_retrain: bool = False,
     seed: int = 0,
     # number of examples per forward pass per device
-    minibatch_size_per_device: Optional[int] = None,
+    minibatch_size_per_replica: Optional[int] = None,
     train_with_dropout: bool = False,
     results_folder: str = "./results",
     # if True, keep the transformer weights frozen and only train the head
@@ -67,6 +67,10 @@ def main(
     skip_inference: bool = False,
     skip_if_exists: bool = False,
 ):
+    # try to clean up memory
+    clear_mem()
+    print(f"{get_gpu_mem_used()*100:.2f}% of all GPU memory in use")
+
     assert (
         ds_name in VALID_DATASETS
     ), f"Unknown dataset {ds_name} not in {VALID_DATASETS}"
@@ -84,8 +88,8 @@ def main(
     loss = loss if is_w2s else "xent"
 
     # this is per device!
-    if minibatch_size_per_device is None:
-        minibatch_size_per_device = model_config.minibatch_size_per_device
+    if minibatch_size_per_replica is None:
+        minibatch_size_per_replica = model_config.minibatch_size_per_replica
 
     use_model_default_lr = lr is None
     if use_model_default_lr:
@@ -118,7 +122,7 @@ def main(
         ("w2s_epochs" if is_w2s else "gt_epochs"): epochs,
         # "force_retrain": force_retrain,
         "seed": seed,
-        # "minibatch_size_per_device": minibatch_size_per_device,
+        # "minibatch_size_per_replica": minibatch_size_per_replica,
         "train_with_dropout": train_with_dropout,
         # "results_folder": results_folder,
         "linear_probe": linear_probe,
@@ -208,7 +212,9 @@ def main(
         config["weak_model"] = weak_model_config
 
     save_path = os.path.join(results_folder, sweep_subfolder, config_name)
-    if skip_if_exists and os.path.exists(save_path) and os.listdir(save_path):
+    if skip_if_exists and os.path.exists(
+        os.path.join(save_path, "results_summary.json")
+    ):
         print(f"Skipping {save_path} because it already exists")
         return save_path
     logger.configure(
@@ -249,7 +255,7 @@ def main(
         epochs=epochs,
         force_retrain=force_retrain,
         eval_batch_size=eval_batch_size,
-        minibatch_size_per_device=minibatch_size_per_device,
+        minibatch_size_per_replica=minibatch_size_per_replica,
         train_with_dropout=train_with_dropout,
         linear_probe=linear_probe,
         lr_schedule=lr_schedule,
