@@ -199,7 +199,11 @@ def main(
                 raise RuntimeError(
                     f"Sync command failed with return code {result.returncode}"
                 )
-        train1_ds = load_from_disk(weak_labels_path)
+
+        # take the predictions from the weak model to be the labels
+        train1_ds = load_from_disk(weak_labels_path).rename_columns(
+            {"hard_pred": "hard_label", "soft_pred": "soft_label"}
+        )
         train2_ds = None
 
         weak_model_config = json.load(

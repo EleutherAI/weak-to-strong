@@ -2,7 +2,6 @@ import datasets
 import numpy as np
 import torch
 from torch import nn
-from torch.cuda.amp import autocast
 from sklearn.metrics import roc_auc_score
 from weak_to_strong.common import to_batch
 
@@ -38,44 +37,29 @@ def eval_model_acc(
             input_ids = torch.nn.utils.rnn.pad_sequence(
                 [torch.tensor(ex) for ex in batch["input_ids"]], batch_first=True
             ).to(model.device if hasattr(model, "device") else "cpu")
-            labels = batch["soft_label"]
-            with autocast():
-                # run forward pass
-                raw_logits = model(
-                    input_ids, choice_input_ids=batch.get("choice_input_ids")
-                )
+            soft_labels = batch["soft_label"]
 
-                raw_logprobs = torch.nn.functional.log_softmax(raw_logits, dim=-1)
-            logprobs = unpack(raw_logprobs)
-            probs = unpack(raw_logprobs.exp())
-            logits = unpack(raw_logits)
-
-            preds = np.argmax(logprobs, axis=-1)
-            labels = np.argmax(labels, axis=-1)
-
-            results.extend(
-                [
-                    dict(
-                        txt=txt,
-                        input_ids=input_id,
-                        gt_label=label,
-                        hard_label=pred,
-                        acc=label == pred,
-                        logits=logit,
-                        soft_label=prob,
-                        logprob=logprob,
-                    )
-                    for input_id, txt, label, pred, prob, logprob, logit in zip(
-                        batch["input_ids"],
-                        batch["txt"],
-                        labels,
-                        preds,
-                        probs,
-                        logprobs,
-                        logits,
-                    )
-                ]
+            # run forward pass
+            raw_logits = model(
+                input_ids, choice_input_ids=batch.get("choice_input_ids")
             )
+
+            raw_logprobs = torch.nn.functional.log_softmax(raw_logits, dim=-1)
+            hard_labels = np.argmax(soft_labels, axis=-1)
+            logprobs = unpack(raw_logprobs)
+            preds = np.argmax(logprobs, axis=-1)
+            r = {
+                "txt": batch["txt"],
+                "input_ids": batch["input_ids"],
+                "supervisor_hard_label": hard_labels,
+                "supervisor_soft_label": soft_labels,
+                "hard_pred": preds,
+                "soft_pred": unpack(raw_logprobs.exp()),
+                "acc": preds == hard_labels,
+                "logits": unpack(raw_logits),
+                "logprobs": logprobs,
+            }
+            results.extend([dict(zip(r, t)) for t in zip(*r.values())])
         accs = [r["acc"] for r in results]
         print(
             "Accuracy against ground truth:",
