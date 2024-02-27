@@ -10,7 +10,6 @@ import torch_optimizer as toptim
 from transformers.modeling_utils import load_sharded_checkpoint
 from sklearn.metrics import roc_auc_score
 from transformers import get_linear_schedule_with_warmup
-import wandb
 
 import weak_to_strong.logger as logger
 from weak_to_strong.common import to_batch, get_gpu_mem_used
@@ -115,7 +114,6 @@ def train_model(
     losses = []
     accuracies = []
     aurocs = []
-    eval_acc_dict = {}
 
     # If the model is wrapped by DataParallel, it doesn't have a device. In this case,
     # we use GPU 0 as the output device. This sadly means that this device will store
@@ -129,7 +127,9 @@ def train_model(
                 assert (
                     eval_ds is not None
                 ), "must provide eval_ds if eval_every is not None"
-                eval_results = eval_model_acc(model, eval_ds, eval_batch_size)
+                eval_results, eval_metrics = eval_model_acc(
+                    model, eval_ds, eval_batch_size, metric_prefix="eval"
+                )
                 if gradient_checkpointing:
                     (
                         model
@@ -138,10 +138,8 @@ def train_model(
                     ).gradient_checkpointing_enable()
                 if train_with_dropout:
                     model.train()
-                eval_acc = np.mean([r["acc"] for r in eval_results])  # type: ignore
-                eval_acc_dict[step] = eval_acc
-                logger.logkv("eval_accuracy", eval_acc)
-                wandb.log({"eval/accuracy": eval_acc})
+                logger.logkvs(eval_metrics)
+
             if save_every and (step + 1) % save_every == 0:
                 save(model, save_path, optimizer, lr_scheduler)
 
@@ -208,7 +206,6 @@ def train_model(
                 "lr": lr_scheduler.get_last_lr()[0],
             }
             logger.logkvs(log_dict)
-            wandb.log(log_dict)
 
             if log_every and step % log_every == 0:
                 print(
@@ -227,10 +224,10 @@ def train_model(
     if eval_every:
         print("Final evaluation:")
         assert eval_ds is not None, "must provide eval_ds if eval_every is not None"
-        final_eval_results = eval_model_acc(model, eval_ds, eval_batch_size)
-        eval_acc = np.mean([r["acc"] for r in final_eval_results])  # type: ignore
-        logger.logkv("eval_accuracy", eval_acc)
-        wandb.log({"eval/accuracy": eval_acc})
+        final_eval_results, final_eval_metrics = eval_model_acc(
+            model, eval_ds, eval_batch_size, metric_prefix="eval"
+        )
+        logger.logkvs(final_eval_metrics)
         logger.dumpkvs()
     if save_every:
         save(model, save_path, optimizer, lr_scheduler)
@@ -337,7 +334,9 @@ def train_and_save_model(
             minibatch_size = minibatch_size_per_replica
 
     if already_trained:
-        test_results = eval_model_acc(model, test_ds, eval_batch_size)
+        test_results, test_metrics = eval_model_acc(
+            model, test_ds, eval_batch_size, metric_prefix="test"
+        )
     else:
         start = time.time()
         test_results = train_model(
@@ -362,10 +361,10 @@ def train_and_save_model(
 
     inference_results = None
     if inference_ds:
-        inference_results = eval_model_acc(model, inference_ds, eval_batch_size)
-        inf_acc = np.mean([r["acc"] for r in inference_results])  # type: ignore
-        logger.logkv("inference_accuracy", inf_acc)
-        wandb.log({"inference/accuracy": inf_acc})
+        inference_results, inferenece_metrics = eval_model_acc(
+            model, inference_ds, eval_batch_size, metric_prefix="inference"
+        )
+        logger.logkvs(inferenece_metrics)
 
     if save_path:
         with open(os.path.join(save_path, "results.pkl"), "wb") as f:
@@ -383,10 +382,10 @@ def train_and_save_model(
                     ),
                     "test_results": test_results,
                     "inference_results": inference_results if inference_results else [],
+                    **test_metrics,
                 },
                 f,
             )
     logger.shutdown()
-    wandb.finish()
 
     return test_results, inference_results

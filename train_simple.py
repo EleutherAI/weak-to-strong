@@ -7,7 +7,6 @@ from typing import Optional
 import fire
 import numpy as np
 from datasets import load_from_disk
-import wandb
 
 import weak_to_strong.logger as logger
 from weak_to_strong.common import get_tokenizer, clear_mem, get_gpu_mem_used
@@ -219,26 +218,24 @@ def main(
         config["weak_model"] = weak_model_config
 
     save_path = os.path.join(results_folder, sweep_subfolder, config_name)
-    logger.configure(
-        name="{sweep_subfolder}_{config_name}_{datetime_now}",
-        save_path=save_path,
-        sweep_subfolder=sweep_subfolder,
-        config_name=config_name,
-    )
+
     if (
         os.path.exists(os.path.join(save_path, "results_summary.json"))
         and skip_if_exists
     ):
         print(f"Skipping {save_path} because it already exists")
         return
-    wandb.init(
-        project="weak-to-strong",
-        config=config,
-        group=sweep_subfolder,
-        job_type="gt" if weak_labels_path is None else "w2s",
-        name=f"{model_size.split('/')[-1]}_{ds_name}_{loss}",
-        dir=results_folder,
-        reinit=True,
+
+    logger.configure(
+        save_path=save_path,
+        wandb_args=dict(
+            project="weak-to-strong",
+            config=config,
+            group=sweep_subfolder,
+            job_type="gt" if weak_labels_path is None else "w2s",
+            name=f"{model_size.split('/')[-1]}_{ds_name}_{loss}",
+            dir=results_folder,
+        ),
     )
 
     # Tokenize datasets
