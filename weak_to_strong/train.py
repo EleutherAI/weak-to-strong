@@ -231,7 +231,7 @@ def train_model(
         logger.dumpkvs()
     if save_every:
         save(model, save_path, optimizer, lr_scheduler)
-    return final_eval_results
+    return final_eval_results, final_eval_metrics
 
 
 def train_and_save_model(
@@ -270,14 +270,14 @@ def train_and_save_model(
     print(f"{get_gpu_mem_used() * 100:.2f}% of all GPU memory in use before training")
 
     def maybe_load_model(model):
-        if os.path.exists(os.path.join(save_path, "results.pkl")) and not force_retrain:
+        checkpoint_path = os.path.join(save_path, "pytorch_model.bin")
+        if os.path.exists(checkpoint_path) and not force_retrain:
             print("loading from", save_path)
-            checkpoint_path = os.path.join(save_path, "pytorch_model.bin")
             if not os.path.exists(checkpoint_path):
                 # Assume this means we have a sharded checkpoint, and load it appropriately
                 load_sharded_checkpoint(model, checkpoint_path)
             else:
-                state_dict = torch.load(os.path.join(save_path, "pytorch_model.bin"))
+                state_dict = torch.load(checkpoint_path)
                 state_dict = {
                     k.replace("transformer.module", "transformer"): v
                     for (k, v) in state_dict.items()
@@ -339,7 +339,7 @@ def train_and_save_model(
         )
     else:
         start = time.time()
-        test_results = train_model(
+        test_results, test_metrics = train_model(
             model,
             train_ds,
             batch_size,
