@@ -11,7 +11,12 @@ import wandb
 
 import weak_to_strong.logger as logger
 from weak_to_strong.common import get_tokenizer, clear_mem, get_gpu_mem_used
-from weak_to_strong.config import MODELS_DICT, get_config_foldername, loss_dict
+from weak_to_strong.config import (
+    MODELS_DICT,
+    ModelConfig,
+    get_config_foldername,
+    loss_dict,
+)
 from weak_to_strong.datasets import (
     VALID_DATASETS,
     tokenize_dataset,
@@ -76,7 +81,7 @@ def main(
     assert (
         weak_model_size is None or weak_labels_path is None
     ), "Can't pass both weak_model_size and weak_labels_path"
-    model_config = MODELS_DICT[model_size]
+    model_config = ModelConfig(**MODELS_DICT[model_size])
     if model_config.model_parallel:
         print(f"Using model parallelism for {model_size}")
 
@@ -141,7 +146,7 @@ def main(
         del weak_model_config["w2s_lr_factor"]
         weak_model_config["gt_epochs"] = gt_epochs
         weak_model_config["lr"] = (
-            MODELS_DICT[weak_model_size].default_lr
+            ModelConfig(**MODELS_DICT[weak_model_size]).default_lr
             if use_model_default_lr
             else lr / w2s_lr_factor
         )

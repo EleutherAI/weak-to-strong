@@ -2,6 +2,7 @@ import torch
 from typing import Optional
 
 import yaml
+import subprocess
 
 from weak_to_strong.loss import logconf_loss_fn, product_loss_fn, xent_loss, kl_loss
 
@@ -44,6 +45,8 @@ class ModelConfig:
             If None, then LORA is not used.
         custom_kwargs (dict, optional):
             Arguments to pass to HF's from_pretrained(). Defaults to None.
+        required_packages (list[str], optional):
+            The list of additional packages required to run the model.
         gradient_checkpointing (bool, optional):
             Whether to use gradient checkpointing. Defaults to None.
         model_parallel (bool, optional):
@@ -87,11 +90,13 @@ class ModelConfig:
         minibatch_size_per_replica: Optional[int] = None,
         lora_modules: Optional[list[str]] = None,
         custom_kwargs: Optional[dict] = None,
+        required_packages: Optional[list[str]] = None,
         gradient_checkpointing: Optional[bool] = None,
         model_parallel: Optional[bool] = None,
         default_optimizer: str = "adam",
         torch_dtype: Optional[str] = None,
     ):
+        assert name is not None
         memory = float(memory)
         custom_kwargs = custom_kwargs or {}
         per_device_ram = torch.cuda.get_device_properties(0).total_memory
@@ -114,7 +119,8 @@ class ModelConfig:
         memory_util_est = memory
         if custom_kwargs["torch_dtype"] == torch.float32:
             memory_util_est *= 2
-        # NOTE: this memory estimate doesn't account for the optimizer, LoRA, checkpointing, etc.
+        # NOTE: this memory estimate doesn't account for the
+        # optimizer, LoRA, checkpointing, seq len, batch size, etc.
 
         if model_parallel is None:
             model_parallel = (
@@ -123,6 +129,17 @@ class ModelConfig:
             )
         if gradient_checkpointing is None:
             gradient_checkpointing = memory_util_est > self.CHECKPOINTING_MEMORY
+
+        if required_packages is not None:
+            for pkg in required_packages:
+                try:
+                    __import__(pkg)
+                except ImportError:
+                    print(
+                        f"Package `{pkg}` required for `{name}`. Attempting to install..."
+                    )
+                    subprocess.check_call(["pip", "install", pkg])
+                    print(f"Successfully installed `{pkg}`.")
 
         if minibatch_size_per_replica is None:
             minibatch_size_per_replica = eval_batch_size
@@ -137,9 +154,8 @@ class ModelConfig:
         self.default_optimizer = default_optimizer
 
 
-MODELS_DICT: dict[str, ModelConfig] = {
-    cfg["name"]: ModelConfig(**cfg)
-    for cfg in load_config("configs/models.yaml")["models"]
+MODELS_DICT: dict[str, dict] = {
+    cfg["name"]: cfg for cfg in load_config("configs/models.yaml")["models"]
 }
 
 
