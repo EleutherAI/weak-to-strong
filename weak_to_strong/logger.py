@@ -19,7 +19,6 @@ class WandbLogger(object):
         self,
         save_path: str,
         wandb_args: dict,
-        **kwargs,
     ):
         wandb.init(**wandb_args)
 

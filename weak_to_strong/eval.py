@@ -63,14 +63,14 @@ def eval_model_acc(
                 "hard_pred": preds,
                 "soft_pred": unpack(raw_logprobs.exp()),
                 "acc": preds == hard_labels,
-                "logits": unpack(raw_logits),
-                "logprobs": logprobs,
+                "logit": unpack(raw_logits),
+                "logprob": logprobs,
             }
             results.extend([dict(zip(r, t)) for t in zip(*r.values())])
 
-        accs, gts, logprobs, soft_labels, probs = (
+        accs, labs, logprobs, soft_labels, probs = (
             np.array([r["acc"] for r in results]),
-            np.array([r["gt_label"] for r in results]),
+            np.array([r["supervisor_hard_label"] for r in results]),
             np.array([r["logprob"] for r in results])[:, 1],
             np.array([r["supervisor_soft_label"] for r in results])[:, 1],
             np.array([r["soft_pred"] for r in results])[:, 1],
@@ -81,17 +81,18 @@ def eval_model_acc(
         label_yes, label_no = (soft_labels > conf_thresh), (
             soft_labels < (1 - conf_thresh)
         )
-        num_confident_disagreements = (pred_yes & label_no).sum() + (
-            pred_no & label_yes
-        ).sum()
-        num_confident_predictions = (pred_yes | pred_no).sum()
+        # we cast to singleton arrays to avoid division by zero errors
+        num_confident_disagreements = np.array(
+            (pred_yes & label_no).sum() + (pred_no & label_yes).sum()
+        )
+        num_confident_predictions = np.array((pred_yes | pred_no).sum())
         CDR = num_confident_disagreements / num_confident_predictions
         CDR_std_err = np.sqrt(CDR * (1 - CDR) / num_confident_predictions)
 
         metrics = {
             "accuracy": np.mean(accs),
             "accuracy_std_err": np.std(accs) / np.sqrt(len(accs)),
-            "roc_auc": roc_auc_score(gts, logprobs),
+            "roc_auc": roc_auc_score(labs, logprobs),
             "CDR": CDR,
             "CDR_std_err": CDR_std_err,
         }
