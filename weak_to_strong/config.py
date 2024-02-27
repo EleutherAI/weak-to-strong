@@ -144,13 +144,13 @@ class ModelConfig:
         batch_size: int,
         use_lm_head: bool,
         eval_batch_size: int,
-        minibatch_size_per_device: Optional[int] = None,
+        minibatch_size_per_replica: Optional[int] = None,
         num_labels: int = 2,
         linear_probe: bool = False,
     ) -> tuple[MODEL_TYPE, int, int]:
         custom_kwargs = self.custom_kwargs or {}
-        if minibatch_size_per_device is None:
-            minibatch_size_per_device = self.minibatch_size_per_device or 1
+        if minibatch_size_per_replica is None:
+            minibatch_size_per_replica = self.minibatch_size_per_replica or 1
         if self.model_parallel:
             assert (
                 torch.cuda.device_count() > 1
@@ -165,7 +165,7 @@ class ModelConfig:
                 **custom_kwargs,
             )
             # slight misnomer, more like minibatch_size_per_dp_replica
-            minibatch_size = minibatch_size_per_device
+            minibatch_size = minibatch_size_per_replica
         else:
             model = TransformerWithHead.from_pretrained(
                 self.name,
@@ -181,7 +181,7 @@ class ModelConfig:
             if torch.cuda.device_count() > 1:
                 model = torch.nn.DataParallel(model, output_device=0)
                 minibatch_size = min(
-                    minibatch_size_per_device * torch.cuda.device_count(), batch_size
+                    minibatch_size_per_replica * torch.cuda.device_count(), batch_size
                 )
                 eval_batch_size = min(torch.cuda.device_count(), eval_batch_size)
                 print(
@@ -193,7 +193,7 @@ class ModelConfig:
                     eval_batch_size,
                 )
             else:
-                minibatch_size = minibatch_size_per_device
+                minibatch_size = minibatch_size_per_replica
         return model, minibatch_size, eval_batch_size
 
 

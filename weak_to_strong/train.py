@@ -297,7 +297,7 @@ def train_and_save_model(
         use_lm_head=use_lm_head,
         eval_batch_size=eval_batch_size,
         linear_probe=linear_probe,
-        minibatch_size_per_device=minibatch_size_per_replica,
+        minibatch_size_per_replica=minibatch_size_per_replica,
     )
     already_trained = maybe_load_model(model)
 
