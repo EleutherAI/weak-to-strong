@@ -8,12 +8,11 @@ import numpy as np
 import torch
 import torch_optimizer as toptim
 from transformers.modeling_utils import load_sharded_checkpoint
-from sklearn.metrics import roc_auc_score
 from transformers import get_linear_schedule_with_warmup
 
 import weak_to_strong.logger as logger
 from weak_to_strong.common import to_batch, get_gpu_mem_used
-from weak_to_strong.eval import eval_loop
+from weak_to_strong.eval import eval_loop, compute_metrics
 from weak_to_strong.loss import kl_loss
 from weak_to_strong.model import TransformerWithHead
 from weak_to_strong.config import ModelConfig
@@ -41,7 +40,7 @@ def train_model(
     batch_size: int,
     lr: float = 1e-5,
     loss_fn: Callable = kl_loss,
-    log_every: int = 400,
+    print_every: int = 10,
     eval_every: Optional[int] = None,
     save_every: Optional[int] = None,
     eval_batch_size: int = 256,
@@ -184,45 +183,57 @@ def train_model(
             if len(all_logits) == 0:
                 # skip batches too small to form a single minibatch
                 continue
-            all_logits = torch.stack(all_logits)
-            all_labels = torch.stack(all_labels)
-            all_hard_labels = torch.argmax(all_labels, dim=1)
-            all_logprobs = torch.nn.functional.log_softmax(
-                all_logits.detach().float(), dim=1
-            )[:, 1]
             torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)
             optimizer.step()
             optimizer.zero_grad()
             lr_scheduler.step()
 
             # train metrics
-            losses.append(loss_tot)
-            accuracies.append(
-                torch.mean(
-                    (torch.argmax(all_logits, dim=1) == all_hard_labels).to(
-                        torch.float32
-                    )
-                ).item()
+            all_logits = torch.stack(all_logits)
+            all_labels = torch.stack(all_labels)
+            pred_probs = np.array(
+                torch.nn.functional.softmax(all_logits.detach().float().cpu(), dim=1)
+            )[:, 1]
+            supervision_soft_labels = np.array(all_labels.cpu())[:, 1]
+
+            is_w2s = "gt_soft_label" in ds.features
+            if is_w2s:
+                # then supervision labels are weak
+                gt_soft_labels = np.array(
+                    ds[start : start + len(pred_probs)]["gt_soft_label"]
+                )[:, 1]
+                weak_soft_labels = supervision_soft_labels
+            else:
+                gt_soft_labels = supervision_soft_labels
+                weak_soft_labels = None
+
+            train_metrics = compute_metrics(
+                gt_soft_labels=gt_soft_labels,
+                pred_probs=pred_probs,
+                weak_soft_labels=weak_soft_labels,
+                metric_prefix="train",
             )
 
-            try:
-                auroc = roc_auc_score(all_hard_labels.cpu(), all_logprobs.cpu())
-            except ValueError as e:
-                print(f"Warning: {e}")
-                auroc = np.nan
-            aurocs.append(auroc)
+            # these three are printed every print_every steps
+            losses.append(loss_tot)
+            accuracies.append(
+                train_metrics["train/acc_against_weak" if is_w2s else "train/acc"]
+            )
+            aurocs.append(
+                train_metrics["train/auroc_against_weak" if is_w2s else "train/auroc"]
+            )
 
-            log_dict = {
-                "step": step,
-                "progress": step / nsteps,
-                "loss": loss_tot,
-                "train_accuracy": accuracies[-1],
-                "train_auroc": aurocs[-1],
-                "lr": lr_scheduler.get_last_lr()[0],
-            }
-            logger.logkvs(log_dict)
+            train_metrics.update(
+                {
+                    "step": step,
+                    "progress": step / nsteps,
+                    "loss": loss_tot,
+                    "lr": lr_scheduler.get_last_lr()[0],
+                }
+            )
+            logger.logkvs(train_metrics)
 
-            if log_every and step % log_every == 0:
+            if print_every and step % print_every == 0:
                 print(
                     f"Step: {step}/{nsteps}; loss: {np.mean(losses)}; "
                     f"train acc: {np.mean(accuracies)}; "

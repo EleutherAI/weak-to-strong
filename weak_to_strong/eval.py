@@ -79,7 +79,6 @@ def eval_loop(
             np.array([r["soft_label"] for r in results])[:, 1],
             np.array([r["soft_pred"] for r in results])[:, 1],
         )
-        metrics = dict()
 
         # if the current evaluation is weak to strong
         if "weak_soft_label" in ds.column_names:
@@ -88,49 +87,71 @@ def eval_loop(
             weak_soft_labels = np.array(ds["weak_soft_label"])[:, 1]
             # truncate away the last partial batch
             weak_soft_labels = weak_soft_labels[: len(pred_probs)]
-            metrics.update(
-                CAR_given_incorrect(pred_probs, weak_soft_labels, hard_labels)
-            )
-            targets = [soft_labels, weak_soft_labels]
         else:
             weak_soft_labels = None
-            targets = [soft_labels]
-
-        # when evaluating w2s, compute metrics a second time against the weak supervision
-        for target_soft_labels in targets:
-            target_hard_labels = target_soft_labels > 0.5
-            preds = pred_probs > 0.5
-
-            accs = preds == target_hard_labels
-            metrics_against_target = {
-                "accuracy": accs.mean(),
-                "accuracy_std_err": np.std(accs) / np.sqrt(len(accs)),
-                "roc_auc": roc_auc_score(target_hard_labels, pred_probs),
-            }
-
-            for metric in [
-                confident_disagreement_rate,
-                expected_overconfidence_error,
-                calibration_error,
-            ]:
-                metrics_against_target.update(
-                    metric(probs=pred_probs, soft_labels=target_soft_labels)
-                )
-
-            if target_soft_labels is weak_soft_labels:
-                metrics_against_target = {
-                    f"{k}_against_weak": v for k, v in metrics_against_target.items()
-                }
-            metrics.update(metrics_against_target)
-
-        if metric_prefix:
-            metrics = {f"{metric_prefix}/{k}": v for k, v in metrics.items()}
+        metrics = compute_metrics(
+            gt_soft_labels=soft_labels,
+            pred_probs=pred_probs,
+            weak_soft_labels=weak_soft_labels,
+            metric_prefix=metric_prefix,
+        )
 
         if verbose:
             for k, v in metrics.items():
                 print(f"\t{k}: {v:.3f}")
 
         return datasets.Dataset.from_list(results), metrics
+
+
+def compute_metrics(
+    gt_soft_labels: np.ndarray,
+    pred_probs: np.ndarray,
+    weak_soft_labels: Optional[np.ndarray] = None,
+    metric_prefix: Optional[str] = None,
+) -> dict[str, float]:
+    np.seterr(divide="ignore")
+    metrics = dict()
+    gt_hard_labels = gt_soft_labels > 0.5
+    if weak_soft_labels is not None:
+        metrics.update(
+            CAR_given_incorrect(pred_probs, weak_soft_labels, gt_hard_labels)
+        )
+        targets = [gt_soft_labels, weak_soft_labels]
+    else:
+        targets = [gt_soft_labels]
+
+    # when evaluating w2s, compute metrics a second time against the weak supervision
+    for target_soft_labels in targets:
+        target_hard_labels = target_soft_labels > 0.5
+        preds = pred_probs > 0.5
+
+        accs = preds == target_hard_labels
+        metrics_against_target = {
+            "acc": float(accs.mean()),
+            "acc_std_err": float(np.std(accs) / np.sqrt(len(accs))),
+            "auroc": float(roc_auc_score(target_hard_labels, pred_probs)),
+        }
+
+        for metric in [
+            confident_disagreement_rate,
+            expected_overconfidence_error,
+            calibration_error,
+        ]:
+            metrics_against_target.update(
+                metric(probs=pred_probs, soft_labels=target_soft_labels)
+            )
+
+        if target_soft_labels is weak_soft_labels:
+            metrics_against_target = {
+                f"{k}_against_weak": v for k, v in metrics_against_target.items()
+            }
+        metrics.update(metrics_against_target)
+
+    if metric_prefix:
+        metrics = {f"{metric_prefix}/{k}": v for k, v in metrics.items()}
+
+    np.seterr(divide="warn")
+    return metrics
 
 
 # ##############################################################################
@@ -203,7 +224,7 @@ def expected_overconfidence_error(
     pointwise_overconfidence = np.where(
         probs > 0.5, probs - soft_labels, soft_labels - probs
     )
-    return {"EOE": pointwise_overconfidence.mean()}
+    return {"EOE": float(pointwise_overconfidence.mean())}
 
 
 def CAR_given_incorrect(
