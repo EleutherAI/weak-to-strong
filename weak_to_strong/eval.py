@@ -12,12 +12,13 @@ def unpack(x):
     return x.detach().float().cpu().numpy().tolist()
 
 
-def eval_model_acc(
+def eval_loop(
     model: nn.Module,
     ds: datasets.Dataset,
     eval_batch_size: int = 16,
     verbose: bool = True,
     metric_prefix: Optional[str] = None,
+    remove_large_columns: bool = False,
 ) -> tuple[datasets.Dataset, dict[str, float]]:
     """
     This function evaluates the accuracy of a given model on a given dataset.
@@ -55,23 +56,29 @@ def eval_model_acc(
             logprobs = unpack(raw_logprobs)
             preds = np.argmax(logprobs, axis=-1)
             r = {
+                "id": batch["id"],
                 "txt": batch["txt"],
                 "input_ids": batch["input_ids"],
-                "supervisor_hard_label": hard_labels,
-                "supervisor_soft_label": soft_labels,
+                "hard_label": hard_labels,
+                "soft_label": soft_labels,
                 "hard_pred": preds,
                 "soft_pred": unpack(raw_logprobs.exp()),
                 "acc": preds == hard_labels,
                 "logit": unpack(raw_logits),
                 "logprob": logprobs,
             }
+            if remove_large_columns:
+                del r["input_ids"]
+                del r["txt"]
+            if "weak_soft_label" in batch:
+                r["weak_soft_label"] = batch["weak_soft_label"]
             results.extend([dict(zip(r, t)) for t in zip(*r.values())])
 
-        accs, hard_labels, logprobs, soft_labels, probs = (
+        accs, hard_labels, soft_labels, logprobs, probs = (
             np.array([r["acc"] for r in results]),
-            np.array([r["supervisor_hard_label"] for r in results]),
+            np.array([r["hard_label"] for r in results]),
+            np.array([r["soft_label"] for r in results])[:, 1],
             np.array([r["logprob"] for r in results])[:, 1],
-            np.array([r["supervisor_soft_label"] for r in results])[:, 1],
             np.array([r["soft_pred"] for r in results])[:, 1],
         )
 
@@ -81,16 +88,23 @@ def eval_model_acc(
             "roc_auc": roc_auc_score(hard_labels, logprobs),
         }
 
-        for metric in [confident_disagreement_rate, expected_overconfidence_error]:
-            metrics.update(metric(probs, soft_labels))
-
         # if the current evaluation is weak to strong
-        if "supervisor_hard_label" in ds.column_names:
-            # these are the labels used to supervise the current model's *supervisor*
-            sup_sup_hard_labels = np.array(ds["supervisor_hard_label"])
+        if "weak_soft_label" in ds.column_names:
+            # these are predictions from the weak supervisor on the eval set
+            # we loaded in `train_simple.py`
+            weak_soft_labels = np.array(ds["weak_soft_label"])[:, 1]
             # truncate away the last partial batch
-            sup_sup_hard_labels = sup_sup_hard_labels[: len(accs)]
-            metrics.update(CAR_given_incorrect(probs, soft_labels, sup_sup_hard_labels))
+            weak_soft_labels = weak_soft_labels[: len(accs)]
+            metrics.update(CAR_given_incorrect(probs, weak_soft_labels, hard_labels))
+        else:
+            weak_soft_labels = None
+
+        # labels corresponding to the supervision signal of the current model
+        supervisor_labels = (
+            weak_soft_labels if weak_soft_labels is not None else soft_labels
+        )
+        for metric in [confident_disagreement_rate, expected_overconfidence_error]:
+            metrics.update(metric(probs, supervisor_labels))
 
         if metric_prefix:
             metrics = {f"{metric_prefix}_{k}": v for k, v in metrics.items()}

@@ -13,7 +13,7 @@ from transformers import get_linear_schedule_with_warmup
 
 import weak_to_strong.logger as logger
 from weak_to_strong.common import to_batch, get_gpu_mem_used
-from weak_to_strong.eval import eval_model_acc
+from weak_to_strong.eval import eval_loop
 from weak_to_strong.loss import kl_loss
 from weak_to_strong.model import TransformerWithHead
 from weak_to_strong.config import ModelConfig
@@ -26,7 +26,7 @@ def save(
     scheduler=None,
     scaler=None,
 ):
-    assert save_path, "must provide save_path if save_every is not None"
+    assert save_path is not None, "must provide save_path if save_every is not None"
     # Note: If the model is wrapped by DataParallel, we need to unwrap it before saving
     model_to_save = model.module if hasattr(model, "module") else model
 
@@ -58,6 +58,8 @@ def train_model(
     ds is a dataset of examples, each of which is a dict with keys:
     - input_ids: a list of token ids
     - soft_label: a list of soft label probabilities
+    - choice_input_ids (optional): a pair of token ids for the answer choices,
+        indicating to use the LM head of the model
     """
 
     print(
@@ -123,13 +125,24 @@ def train_model(
     for epoch in range(epochs):
         for start in range(0, len(ds), batch_size):
             loss_tot = 0
+
+            # eval
             if eval_every and (step + 1) % eval_every == 0:
                 assert (
                     eval_ds is not None
                 ), "must provide eval_ds if eval_every is not None"
-                eval_results, eval_metrics = eval_model_acc(
-                    model, eval_ds, eval_batch_size, metric_prefix="eval"
+                eval_results, eval_metrics = eval_loop(
+                    model,
+                    eval_ds,
+                    eval_batch_size,
+                    metric_prefix="eval",
+                    remove_large_columns=True,
                 )
+                logger.logkvs(eval_metrics)
+                if save_path is not None:
+                    eval_results.save_to_disk(
+                        os.path.join(save_path, f"eval_results_{step}")
+                    )
                 if gradient_checkpointing:
                     (
                         model
@@ -138,11 +151,12 @@ def train_model(
                     ).gradient_checkpointing_enable()
                 if train_with_dropout:
                     model.train()
-                logger.logkvs(eval_metrics)
 
+            # save
             if save_every and (step + 1) % save_every == 0:
                 save(model, save_path, optimizer, lr_scheduler)
 
+            # train step
             all_logits = []
             all_labels = []
             for mbatch in to_batch(
@@ -181,6 +195,7 @@ def train_model(
             optimizer.zero_grad()
             lr_scheduler.step()
 
+            # train metrics
             losses.append(loss_tot)
             accuracies.append(
                 torch.mean(
@@ -220,17 +235,29 @@ def train_model(
             step += 1
             logger.dumpkvs()
 
+    # final eval
     final_eval_results = None
     if eval_every:
         print("Final evaluation:")
         assert eval_ds is not None, "must provide eval_ds if eval_every is not None"
-        final_eval_results, final_eval_metrics = eval_model_acc(
-            model, eval_ds, eval_batch_size, metric_prefix="eval"
+        final_eval_results, final_eval_metrics = eval_loop(
+            model,
+            eval_ds,
+            eval_batch_size,
+            metric_prefix="eval",
+            remove_large_columns=False,
         )
         logger.logkvs(final_eval_metrics)
         logger.dumpkvs()
+        if save_path is not None:
+            final_eval_results.save_to_disk(
+                os.path.join(save_path, "eval_results_final")
+            )
+
+    # save final model
     if save_every:
         save(model, save_path, optimizer, lr_scheduler)
+
     return final_eval_results, final_eval_metrics
 
 
@@ -334,8 +361,12 @@ def train_and_save_model(
             minibatch_size = minibatch_size_per_replica
 
     if already_trained:
-        test_results, test_metrics = eval_model_acc(
-            model, test_ds, eval_batch_size, metric_prefix="test"
+        test_results, test_metrics = eval_loop(
+            model,
+            test_ds,
+            eval_batch_size,
+            metric_prefix="test",
+            remove_large_columns=False,
         )
     else:
         start = time.time()
@@ -361,8 +392,12 @@ def train_and_save_model(
 
     inference_results = None
     if inference_ds:
-        inference_results, inferenece_metrics = eval_model_acc(
-            model, inference_ds, eval_batch_size, metric_prefix="inference"
+        inference_results, inferenece_metrics = eval_loop(
+            model,
+            inference_ds,
+            eval_batch_size,
+            metric_prefix="inference",
+            remove_large_columns=False,
         )
         logger.logkvs(inferenece_metrics)
 
@@ -380,8 +415,6 @@ def train_and_save_model(
                             else [np.nan]
                         )
                     ),
-                    "test_results": test_results,
-                    "inference_results": inference_results if inference_results else [],
                     **test_metrics,
                 },
                 f,

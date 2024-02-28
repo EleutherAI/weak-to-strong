@@ -206,7 +206,12 @@ def main(
 
         # take the predictions from the weak model to be the labels
         train1_ds = load_from_disk(weak_labels_path).rename_columns(
-            {"hard_pred": "hard_label", "soft_pred": "soft_label"}
+            {
+                "hard_label": "gt_hard_label",
+                "soft_label": "gt_soft_label",
+                "hard_pred": "hard_label",
+                "soft_pred": "soft_label",
+            }
         )
         train2_ds = None
 
@@ -244,6 +249,23 @@ def main(
     test_ds = tokenize_dataset(test_ds, tokenizer, max_ctx)  # type: ignore
     if train2_ds:
         train2_ds = tokenize_dataset(train2_ds, tokenizer, max_ctx)
+
+    # try to add a weak_labels column to the test dataset if running w2s
+    if weak_labels_path is not None:
+        weak_test_results_path = weak_labels_path.replace(
+            "weak_labels", "eval_results_final"
+        )
+        if os.path.exists(weak_test_results_path):
+            weak_test_results = load_from_disk(weak_test_results_path)
+            test_ds = test_ds.select(range(len(weak_test_results))).add_column(
+                "weak_soft_label", weak_test_results["soft_pred"]
+            )  # type: ignore
+            assert test_ds["id"] == weak_test_results["id"], "IDs don't match"
+        else:
+            print(
+                f"No weak test results at {weak_test_results_path}, "
+                "some metrics will not be logged."
+            )
 
     loss_fn = loss_dict[loss]
     print(f"Training model {model_size}")
