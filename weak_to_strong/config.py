@@ -4,6 +4,9 @@ from typing import Optional
 import yaml
 
 from weak_to_strong.loss import logconf_loss_fn, product_loss_fn, xent_loss, kl_loss
+from weak_to_strong.model import TransformerWithHead
+
+MODEL_TYPE = TransformerWithHead | torch.nn.DataParallel[TransformerWithHead]
 
 
 def load_config(config_path="configs/default.yaml"):
@@ -135,6 +138,63 @@ class ModelConfig:
         self.gradient_checkpointing = gradient_checkpointing
         self.model_parallel = model_parallel
         self.default_optimizer = default_optimizer
+
+    def load_model(
+        self,
+        batch_size: int,
+        use_lm_head: bool,
+        eval_batch_size: int,
+        minibatch_size_per_replica: Optional[int] = None,
+        num_labels: int = 2,
+        linear_probe: bool = False,
+    ) -> tuple[MODEL_TYPE, int, int]:
+        custom_kwargs = self.custom_kwargs or {}
+        if minibatch_size_per_replica is None:
+            minibatch_size_per_replica = self.minibatch_size_per_replica or 1
+        if self.model_parallel:
+            assert (
+                torch.cuda.device_count() > 1
+            ), f"you might want more gpus for {self.name}"
+            model = TransformerWithHead.from_pretrained(
+                self.name,
+                lora_modules=self.lora_modules,
+                use_lm_head=use_lm_head,
+                num_labels=num_labels,
+                device_map="auto",
+                linear_probe=linear_probe,
+                **custom_kwargs,
+            )
+            # slight misnomer, more like minibatch_size_per_dp_replica
+            minibatch_size = minibatch_size_per_replica
+        else:
+            model = TransformerWithHead.from_pretrained(
+                self.name,
+                lora_modules=self.lora_modules,
+                use_lm_head=use_lm_head,
+                num_labels=num_labels,
+                linear_probe=linear_probe,
+                **custom_kwargs,
+            ).to(
+                "cuda"  # type: ignore
+            )
+            # data parallel:  currently not supported with model parallel
+            if torch.cuda.device_count() > 1:
+                model = torch.nn.DataParallel(model, output_device=0)
+                minibatch_size = min(
+                    minibatch_size_per_replica * torch.cuda.device_count(), batch_size
+                )
+                eval_batch_size = min(torch.cuda.device_count(), eval_batch_size)
+                print(
+                    "Using",
+                    torch.cuda.device_count(),
+                    "GPUs, setting minibatch_size to",
+                    minibatch_size,
+                    "and eval_batch_size to",
+                    eval_batch_size,
+                )
+            else:
+                minibatch_size = minibatch_size_per_replica
+        return model, minibatch_size, eval_batch_size
 
 
 MODELS_DICT: dict[str, ModelConfig] = {

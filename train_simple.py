@@ -43,7 +43,7 @@ def main(
     # number of examples per forward pass per device
     minibatch_size_per_replica: Optional[int] = None,
     train_with_dropout: bool = False,
-    results_folder: str = "/tmp/results",
+    results_folder: str = "./results",
     # if True, keep the transformer weights frozen and only train the head
     linear_probe: bool = False,
     lr_schedule: str = "cosine_anneal",
@@ -59,6 +59,7 @@ def main(
     # still do final evals (which requires eval_every to be set to a non-zero, non-None value).
     # Grount-truth fine-tuning does not do any intermediate evals.
     w2s_eval_every: int = 10000000,
+    w2s_log_every: int = 100,
     # If set, this command will be run to sync the results to remote storage
     # non-positive values mean we don't save any checkpoints
     sync_command: Optional[str] = None,
@@ -82,6 +83,7 @@ def main(
 
     is_w2s = weak_labels_path is not None or weak_model_size is not None
     eval_every = w2s_eval_every if is_w2s else 10000000
+    log_every = w2s_log_every if is_w2s else None
     epochs = w2s_epochs if is_w2s else gt_epochs
     loss = loss if is_w2s else "xent"
 
@@ -210,27 +212,27 @@ def main(
         config["weak_model"] = weak_model_config
 
     save_path = os.path.join(results_folder, sweep_subfolder, config_name)
+    if skip_if_exists and os.path.exists(
+        os.path.join(save_path, "results_summary.json")
+    ):
+        print(f"Skipping {save_path} because it already exists")
+        return save_path
     logger.configure(
         name="{sweep_subfolder}_{config_name}_{datetime_now}",
         save_path=save_path,
         sweep_subfolder=sweep_subfolder,
         config_name=config_name,
     )
-    if (
-        os.path.exists(os.path.join(save_path, "results_summary.json"))
-        and skip_if_exists
-    ):
-        print(f"Skipping {save_path} because it already exists")
-        return
-    wandb.init(
-        project="weak-to-strong",
-        config=config,
-        group=sweep_subfolder,
-        job_type="gt" if weak_labels_path is None else "w2s",
-        name=f"{model_size.split('/')[-1]}_{ds_name}_{loss}",
-        dir=results_folder,
-        reinit=True,
-    )
+    if wandb.run is None:
+        wandb.init(
+            project="weak-to-strong",
+            config=config,
+            group=sweep_subfolder,
+            job_type="gt" if weak_labels_path is None else "w2s",
+            name=f"{model_size.split('/')[-1]}_{ds_name}_{loss}",
+            dir=results_folder,
+            reinit=True,
+        )
 
     # Tokenize datasets
     tokenizer = get_tokenizer(model_config.name)
@@ -241,7 +243,7 @@ def main(
 
     loss_fn = loss_dict[loss]
     print(f"Training model {model_size}")
-    test_results, weak_ds = train_and_save_model(
+    best_test_results, final_test_results, weak_ds = train_and_save_model(
         model_config,
         train1_ds,  # this has weak labels iff weak_labels_path is not None
         test_ds,  # this has ground truth labels no matter what
@@ -260,14 +262,21 @@ def main(
         optimizer_name=optim,
         eval_every=eval_every,
         save_every=save_every,
+        log_every=log_every,
     )
 
     if weak_ds is not None:
         weak_ds.save_to_disk(save_path + "/" + "weak_labels")
 
-    acc = np.mean([x["acc"] for x in test_results])  # type: ignore
-    res_dict = {"accuracy": acc}
-    print("accuracy:", acc)
+    final_acc = np.mean([x["acc"] for x in final_test_results])  # type: ignore
+    res_dict = {"final_accuracy": final_acc}
+    if best_test_results is not None:
+        best_acc = np.mean([x["acc"] for x in best_test_results])  # type: ignore
+        res_dict["best_accuracy"] = best_acc
+        print("best accuracy:", best_acc)
+    print("final accuracy:", final_acc)
+    if wandb.run is not None:
+        wandb.log(res_dict)
 
     with open(os.path.join(save_path, "config.json"), "w") as f:
         json.dump(config, f, indent=2)
@@ -288,6 +297,7 @@ def main(
                 )
         except Exception as e:
             raise RuntimeError("Failed to sync results to remote storage.") from e
+    return save_path
 
 
 if __name__ == "__main__":

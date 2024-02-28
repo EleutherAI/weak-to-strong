@@ -8,3 +8,6 @@ dump
 *.pyc
 *.swp
 *.swo
+
+results
+wandb

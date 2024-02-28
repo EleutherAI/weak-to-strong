@@ -2,8 +2,15 @@ import gc
 
 import torch
 from transformers import AutoTokenizer
-
+import wandb
 import pynvml
+
+
+def wandb_finish(sweep: bool = False):
+    if wandb.run is None:
+        return
+    if sweep or wandb.run.sweep_id is None:
+        wandb.finish()
 
 
 def to_batch(x, batch_size: int, start: int = 0, end: int | None = None):

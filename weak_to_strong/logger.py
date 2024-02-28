@@ -5,6 +5,8 @@ from typing import Optional
 
 import wandb
 
+from weak_to_strong.common import wandb_finish
+
 
 def append_to_jsonl(path: str, data: dict):
     with open(path, "a") as f:
@@ -22,7 +24,7 @@ class WandbLogger(object):
     ):
         project = os.environ.get("WANDB_PROJECT")
         self.use_wandb = project is not None
-        if self.use_wandb:
+        if self.use_wandb and wandb.run is None:
             wandb.init(
                 config=kwargs,
                 project=project,
@@ -53,7 +55,7 @@ class WandbLogger(object):
 
     def shutdown(self):
         if self.use_wandb:
-            wandb.finish()
+            wandb_finish()
 
 
 def is_configured():

@@ -1,9 +1,30 @@
 from dataclasses import dataclass
-
 import torch
 from transformers import AutoConfig, AutoModelForCausalLM, PreTrainedModel
 from peft import get_peft_model, LoraConfig, TaskType, PeftType  # type: ignore
 from typing import Optional
+
+
+# Recursive attribute access
+def del_attr(obj, names):
+    if len(names) == 1:
+        delattr(obj, names[0])
+    else:
+        del_attr(getattr(obj, names[0]), names[1:])
+
+
+def set_attr(obj, names, val):
+    if len(names) == 1:
+        setattr(obj, names[0], val)
+    else:
+        set_attr(getattr(obj, names[0]), names[1:], val)
+
+
+def get_attr(obj, names):
+    if len(names) == 1:
+        return getattr(obj, names[0])
+    else:
+        return get_attr(getattr(obj, names[0]), names[1:])
 
 
 @dataclass
@@ -68,6 +89,9 @@ class TransformerWithHead(PreTrainedModel):
                 lm_head.weight.dtype
             )
             torch.nn.init.normal_(self.score.weight, std=0.0)
+            print("Initialized linear head to zeros")
+            print(f"lm_head.weight.dtype={lm_head.weight.dtype}")
+            print(f"score.weight.dtype={self.score.weight.dtype}")
         self.linear_probe = linear_probe
 
     @property
@@ -77,6 +101,10 @@ class TransformerWithHead(PreTrainedModel):
                 self.lm.base_model.base_model
             )  # PeftModel -> LoraModel -> PreTrainedModel
         return self.lm.base_model  # CausalLM -> PreTrainedModel
+
+    @property
+    def requires_grad(self):
+        return any([p.requires_grad for p in self.parameters()])
 
     @classmethod
     def from_pretrained(cls, name, **kwargs):
@@ -130,9 +158,44 @@ class TransformerWithHead(PreTrainedModel):
                     for i in range(len(input_lens))
                 ]
             )
-            self.score.to(hidden_states.device)
+            self.score.to(device=hidden_states.device, dtype=hidden_states.dtype)
             if self.linear_probe:
                 hidden_states = hidden_states.detach()
             logits = self.score(hidden_states)
 
         return logits
+
+    def update_state(self, path: str, update_coef: float | torch.Tensor = 1.0):
+        assert self.lora_modules is not None
+        print(f"update_coef={update_coef}")
+        if not isinstance(update_coef, torch.Tensor):
+            update_coef = torch.tensor(update_coef)
+        state_dict = torch.load(path)
+        state_dict = {
+            k.replace("transformer.module", "transformer"): v
+            for (k, v) in state_dict.items()
+        }
+
+        # directly update model state using update_coef
+        updated = False
+        last_cuda_device = None
+        for name, state in state_dict.items():
+            if "lora" in name or "score" in name:
+                orig_param = get_attr(self, name.split("."))
+                if orig_param.is_cuda:
+                    last_cuda_device = orig_param.device
+                else:
+                    print(f"Moving {name} to {last_cuda_device}")
+                    orig_param = orig_param.to(device=last_cuda_device)
+                state = state.to(device=orig_param.device, dtype=orig_param.dtype)
+                state.requires_grad_(False)
+                update_coef = update_coef.to(
+                    device=orig_param.device, dtype=orig_param.dtype
+                )
+                assert (state != orig_param).any()
+                updated_param = update_coef * state + (1 - update_coef) * orig_param
+                del_attr(self, name.split("."))
+                set_attr(self, name.split("."), updated_param)
+                updated = True
+        if not updated:
+            raise ValueError("No parameters updated")
