@@ -74,19 +74,12 @@ def eval_loop(
                 r["weak_soft_label"] = batch["weak_soft_label"]
             results.extend([dict(zip(r, t)) for t in zip(*r.values())])
 
-        accs, hard_labels, soft_labels, logprobs, probs = (
-            np.array([r["acc"] for r in results]),
-            np.array([r["hard_label"] for r in results]),
+        # compute metrics
+        soft_labels, pred_probs = (
             np.array([r["soft_label"] for r in results])[:, 1],
-            np.array([r["logprob"] for r in results])[:, 1],
             np.array([r["soft_pred"] for r in results])[:, 1],
         )
-
-        metrics = {
-            "accuracy": np.mean(accs),
-            "accuracy_std_err": np.std(accs) / np.sqrt(len(accs)),
-            "roc_auc": roc_auc_score(hard_labels, logprobs),
-        }
+        metrics = dict()
 
         # if the current evaluation is weak to strong
         if "weak_soft_label" in ds.column_names:
@@ -94,26 +87,55 @@ def eval_loop(
             # we loaded in `train_simple.py`
             weak_soft_labels = np.array(ds["weak_soft_label"])[:, 1]
             # truncate away the last partial batch
-            weak_soft_labels = weak_soft_labels[: len(accs)]
-            metrics.update(CAR_given_incorrect(probs, weak_soft_labels, hard_labels))
+            weak_soft_labels = weak_soft_labels[: len(pred_probs)]
+            metrics.update(
+                CAR_given_incorrect(pred_probs, weak_soft_labels, hard_labels)
+            )
+            targets = [soft_labels, weak_soft_labels]
         else:
             weak_soft_labels = None
+            targets = [soft_labels]
 
-        # labels corresponding to the supervision signal of the current model
-        supervisor_labels = (
-            weak_soft_labels if weak_soft_labels is not None else soft_labels
-        )
-        for metric in [confident_disagreement_rate, expected_overconfidence_error]:
-            metrics.update(metric(probs, supervisor_labels))
+        # when evaluating w2s, compute metrics a second time against the weak supervision
+        for target_soft_labels in targets:
+            target_hard_labels = target_soft_labels > 0.5
+            preds = pred_probs > 0.5
+
+            accs = preds == target_hard_labels
+            metrics_against_target = {
+                "accuracy": accs.mean(),
+                "accuracy_std_err": np.std(accs) / np.sqrt(len(accs)),
+                "roc_auc": roc_auc_score(target_hard_labels, pred_probs),
+            }
+
+            for metric in [
+                confident_disagreement_rate,
+                expected_overconfidence_error,
+                calibration_error,
+            ]:
+                metrics_against_target.update(
+                    metric(probs=pred_probs, soft_labels=target_soft_labels)
+                )
+
+            if target_soft_labels is weak_soft_labels:
+                metrics_against_target = {
+                    f"{k}_against_weak": v for k, v in metrics_against_target.items()
+                }
+            metrics.update(metrics_against_target)
 
         if metric_prefix:
-            metrics = {f"{metric_prefix}_{k}": v for k, v in metrics.items()}
+            metrics = {f"{metric_prefix}/{k}": v for k, v in metrics.items()}
 
         if verbose:
             for k, v in metrics.items():
                 print(f"\t{k}: {v:.3f}")
 
         return datasets.Dataset.from_list(results), metrics
+
+
+# ##############################################################################
+# # Metrics
+# ##############################################################################
 
 
 def confident_disagreement_rate(
@@ -189,12 +211,18 @@ def CAR_given_incorrect(
 ) -> dict[str, float]:
     """
     Computes the Confident Agreement Rate (CAR) conditional on the student
-    providing a ground-truth incorrect prediction.
+    providing a ground-truth incorrect prediction. This is the number of confident
+    student-supervisor agreements on incorrect predictions, divided by the number
+    of confident incorrect predictions.
+
+    This can help determine whether a model is answering incorrectly due
+    to poor supervision or poor optimization.
 
     Parameters:
     probs (np.ndarray): The predicted probabilities.
     soft_labels (np.ndarray): The soft labels.
     gt_labels (np.ndarray): The ground truth hard labels.
+    conf_thresh (float): The confidence threshold for the CAR.
 
     Returns:
     dict containing
@@ -225,3 +253,72 @@ def CAR_given_incorrect(
         "CAR_given_incorrect": float(CAR_given_incorrect),
         "CAR_given_incorrect_std_err": float(CAR_given_incorrect_std_err),
     }
+
+
+def calibration_error(
+    probs: np.ndarray, soft_labels: np.ndarray, p: int = 2
+) -> dict[str, float]:
+    """
+    Taken from
+    https://github.com/EleutherAI/elk/blob/84e99a36a5050881d85f1510a2486ce46ac1f942/elk/metrics/calibration.py#L14
+
+    Monotonic Sweep Calibration Error for binary problems.
+
+    This method estimates the True Calibration Error (TCE) by searching for the largest
+    number of bins into which the data can be split that preserves the monotonicity
+    of the predicted confidence -> empirical accuracy mapping. We use equal mass bins
+    (quantiles) instead of equal width bins. Roelofs et al. (2020) show that this
+    estimator has especially low bias in simulations where the TCE is analytically
+    computable, and is hyperparameter-free (except for the type of norm used).
+
+    Paper: "Mitigating Bias in Calibration Error Estimation" by Roelofs et al. (2020)
+    Link: https://arxiv.org/abs/2012.08668
+
+    Args:
+        labels: The ground truth (soft) labels.
+        probs: The predicted probabilities.
+        p: The norm to use for the calibration error. Defaults to 2 (Euclidean).
+    """
+
+    # Convert to torch tensors
+    labels = torch.as_tensor(soft_labels)
+    pred_probs = torch.as_tensor(probs)
+
+    n = len(pred_probs)
+    if n < 2:
+        raise ValueError("Not enough data to compute calibration error.")
+
+    # Sort the predictions and labels
+    pred_probs, indices = pred_probs.sort()
+    labels = labels[indices].float()
+
+    # Search for the largest number of bins which preserves monotonicity.
+    # Based on Algorithm 1 in Roelofs et al. (2020).
+    # Using a single bin is guaranteed to be monotonic, so we start there.
+    b_star, accs_star = 1, labels.mean().unsqueeze(0)
+    for b in range(2, n + 1):
+        # Split into (nearly) equal mass bins
+        freqs = torch.stack([h.mean() for h in labels.tensor_split(b)])
+
+        # This binning is not strictly monotonic, let's break
+        if not torch.all(freqs[1:] > freqs[:-1]):
+            break
+
+        elif not torch.all(freqs * (1 - freqs)):
+            break
+
+        # Save the current binning, it's monotonic and may be the best one
+        else:
+            accs_star = freqs
+            b_star = b
+
+    # Split into (nearly) equal mass bins. They won't be exactly equal, so we
+    # still weight the bins by their size.
+    conf_bins = pred_probs.tensor_split(b_star)
+    w = pred_probs.new_tensor([len(c) / n for c in conf_bins])
+
+    # See the definition of ECE_sweep in Equation 8 of Roelofs et al. (2020)
+    mean_confs = torch.stack([c.mean() for c in conf_bins])
+    ece = torch.sum(w * torch.abs(accs_star - mean_confs) ** p) ** (1 / p)
+
+    return {"ECE": ece.item(), "ECE_num_bins": b_star}
