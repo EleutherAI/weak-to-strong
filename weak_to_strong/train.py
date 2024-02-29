@@ -20,14 +20,11 @@ from weak_to_strong.config import ModelConfig
 def save(
     model: torch.nn.Module,
     save_file: Optional[str],
-    optimizer=None,
-    scheduler=None,
-    scaler=None,
 ):
     # Note: If the model is wrapped by DataParallel, we need to unwrap it before saving
     model_to_save = model.module if hasattr(model, "module") else model
 
-    model_to_save.save_torch(save_file, optimizer, scheduler, scaler)
+    model_to_save.save_state_dict(save_file)
     print("saved torch weights", save_file)
 
 

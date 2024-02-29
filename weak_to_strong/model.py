@@ -3,6 +3,7 @@ from dataclasses import dataclass
 import torch
 from transformers import AutoConfig, AutoModelForCausalLM, PreTrainedModel
 from peft import get_peft_model, LoraConfig, TaskType, PeftType  # type: ignore
+from peft.tuners.lora.layer import LoraLayer
 from typing import Optional
 
 
@@ -82,15 +83,31 @@ class TransformerWithHead(PreTrainedModel):
     def from_pretrained(cls, name, **kwargs):
         return cls(name, **kwargs)
 
-    def save_torch(self, path, optimizer=None, scheduler=None, scaler=None):
-        save_dict = self.state_dict()
-        if optimizer is not None:
-            save_dict["optimizer"] = optimizer.state_dict()
-        if scheduler is not None:
-            save_dict["scheduler"] = scheduler.state_dict()
-        if scaler is not None:
-            save_dict["scaler"] = scaler.state_dict()
+    @property
+    def modules_to_save(self):
+        save_modules: list = [
+            m for m in self.transformer.modules() if isinstance(m, LoraLayer)
+        ]
+        if self.score is not None:
+            save_modules.append(self.score)
+        return save_modules
+
+    def save_state_dict(self, path):
+        # only save lora parameters
+        if self.lora_modules is None:
+            save_dict = self.state_dict()
+        else:
+            save_dict = {}
+            for m in self.modules_to_save:
+                save_dict.update(m.state_dict())
         torch.save(save_dict, path)
+
+    def load_state_dict(self, state_dict, strict=True, assign=True):
+        if self.lora_modules is not None:
+            return super().load_state_dict(state_dict, strict, assign)
+        else:
+            for m, sd in zip(self.modules_to_save, state_dict):
+                m.load_state_dict(sd, strict, assign)
 
     def gradient_checkpointing_enable(self):
         model = self.transformer if self.score is not None else self.lm
