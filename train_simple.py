@@ -61,14 +61,22 @@ def main(
     sweep_subfolder: str = "default",
     # Set to a very large value so that by default we don't do any intermediate evals but
     # still do final evals (which requires eval_every to be set to a non-zero, non-None value).
-    # Grount-truth fine-tuning does not do any intermediate evals.
     w2s_eval_every: int = 10000000,
+    gt_eval_every: int = 10000000,
     # If set, this command will be run to sync the results to remote storage
     # non-positive values mean we don't save any checkpoints
     sync_command: Optional[str] = None,
     save_every: int = 1000000,
     skip_inference: bool = False,
     skip_if_exists: bool = False,
+    # Similar to HF trainer load_best_model_at_end behavior
+    # https://huggingface.co/docs/transformers/main_classes/trainer
+    load_best_model_at_end: bool = False,
+    # using the "against_supervision" suffix will ensure that the metric is measured
+    # against whatever labeler was used to train the model, whether weak or strong
+    metric_for_best_model: str = "eval/auroc_against_supervision",
+    greater_is_better: bool = True,
+    save_total_limit: Optional[int] = 1,
 ):
     # try to clean up memory
     clear_mem()
@@ -85,7 +93,7 @@ def main(
         print(f"Using model parallelism for {model_size}")
 
     is_w2s = weak_labels_path is not None or weak_model_size is not None
-    eval_every = w2s_eval_every if is_w2s else 10000000
+    eval_every = w2s_eval_every if is_w2s else gt_eval_every
     epochs = w2s_epochs if is_w2s else gt_epochs
     loss = loss if is_w2s else "xent"
 
@@ -131,9 +139,13 @@ def main(
         "lr_schedule": lr_schedule,
         # "save_every": save_every,
         # "sweep_subfolder": sweep_subfolder,
+        ("w2s_eval_every" if is_w2s else "gt_eval_every"): eval_every,
+        "load_best_model_at_end": load_best_model_at_end,
+        "metric_for_best_model": metric_for_best_model,
+        "greater_is_better": greater_is_better,
+        "save_total_limit": save_total_limit,
     }
     if is_w2s:
-        config["strong_eval_every"] = w2s_eval_every
         config["w2s_lr_factor"] = w2s_lr_factor
 
     if weak_model_size is not None:
@@ -141,9 +153,10 @@ def main(
         weak_model_config["model_size"] = weak_model_size
         weak_model_config["loss"] = "xent"
         del weak_model_config["w2s_epochs"]
-        del weak_model_config["strong_eval_every"]
+        del weak_model_config["w2s_eval_every"]
         del weak_model_config["w2s_lr_factor"]
         weak_model_config["gt_epochs"] = gt_epochs
+        weak_model_config["gt_eval_every"] = gt_eval_every
         weak_model_config["lr"] = (
             ModelConfig(**MODELS_DICT[weak_model_size]).default_lr
             if use_model_default_lr
@@ -288,6 +301,10 @@ def main(
         optimizer_name=optim,
         eval_every=eval_every,
         save_every=save_every,
+        load_best_model_at_end=load_best_model_at_end,
+        metric_for_best_model=metric_for_best_model,
+        greater_is_better=greater_is_better,
+        save_total_limit=save_total_limit,
     )
 
     if weak_ds is not None:

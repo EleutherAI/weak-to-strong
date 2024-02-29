@@ -109,7 +109,7 @@ def compute_metrics(
     weak_soft_labels: Optional[np.ndarray] = None,
     metric_prefix: Optional[str] = None,
 ) -> dict[str, float]:
-    np.seterr(divide="ignore")
+    np.seterr(divide="ignore", invalid="ignore")
     metrics = dict()
     gt_hard_labels = gt_soft_labels > 0.5
     if weak_soft_labels is not None:
@@ -150,7 +150,7 @@ def compute_metrics(
     if metric_prefix:
         metrics = {f"{metric_prefix}/{k}": v for k, v in metrics.items()}
 
-    np.seterr(divide="warn")
+    np.seterr(divide="warn", invalid="warn")
     return metrics
 
 

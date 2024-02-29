@@ -7,7 +7,6 @@ import datasets
 import numpy as np
 import torch
 import torch_optimizer as toptim
-from transformers.modeling_utils import load_sharded_checkpoint
 from transformers import get_linear_schedule_with_warmup
 
 import weak_to_strong.logger as logger
@@ -20,16 +19,14 @@ from weak_to_strong.config import ModelConfig
 
 def save(
     model: torch.nn.Module,
-    save_path: Optional[str],
+    save_file: Optional[str],
     optimizer=None,
     scheduler=None,
     scaler=None,
 ):
-    assert save_path is not None, "must provide save_path if save_every is not None"
     # Note: If the model is wrapped by DataParallel, we need to unwrap it before saving
     model_to_save = model.module if hasattr(model, "module") else model
 
-    save_file = os.path.join(save_path, "pytorch_model.bin")
     model_to_save.save_torch(save_file, optimizer, scheduler, scaler)
     print("saved torch weights", save_file)
 
@@ -52,6 +49,14 @@ def train_model(
     save_path: Optional[str] = None,
     lr_schedule: str = "cosine_anneal",
     optimizer_name: str = "adam",
+    # Similar to HF trainer load_best_model_at_end behavior
+    # https://huggingface.co/docs/transformers/main_classes/trainer
+    load_best_model_at_end: bool = False,
+    # using the "against_supervision" suffix will ensure that the metric is measured
+    # against whatever labeler was used to train the model, whether weak or strong
+    metric_for_best_model: str = "eval/auroc_against_supervision",
+    greater_is_better: bool = True,
+    save_total_limit: Optional[int] = 1,
 ):
     """
     ds is a dataset of examples, each of which is a dict with keys:
@@ -60,26 +65,28 @@ def train_model(
     - choice_input_ids (optional): a pair of token ids for the answer choices,
         indicating to use the LM head of the model
     """
-
     print(
-        "LR",
-        lr,
-        "batch_size",
-        batch_size,
-        "minibatch_size",
-        minibatch_size,
-        "dataset length",
-        len(ds),
+        f"LR: {lr}, batch size: {batch_size}, mbatch size: {minibatch_size}, n: {len(ds)}"
     )
     assert (
         batch_size % minibatch_size == 0
     ), "batch size must be divisible by minibatch size"
+
+    def checkpoint_name(step):
+        assert (
+            save_path is not None
+        ), "save_path must not be None if save_every is not None"
+        return os.path.join(save_path, f"checkpoint_{step}.bin")
+
+    is_w2s = "gt_soft_label" in ds.features
+    if metric_for_best_model.endswith("_against_supervision"):
+        metric_for_best_model = metric_for_best_model.replace(
+            "_against_supervision", "_against_weak" if is_w2s else ""
+        )
+
     # we purposefully turn off dropout, for determinism
     # this seems to help for 1 epoch finetuning anyways
-    if train_with_dropout:
-        model.train()
-    else:
-        model.eval()
+    model.train(mode=train_with_dropout)
     if gradient_checkpointing:
         (
             model if hasattr(model, "gradient_checkpointing_enable") else model.module
@@ -115,6 +122,40 @@ def train_model(
     losses = []
     accuracies = []
     aurocs = []
+    best_eval = float("-inf") if greater_is_better else float("inf")
+    best_step = None
+    ckpt_names = []
+
+    def delete_old_checkpoints():
+        if save_total_limit is None:
+            return
+        num_to_delete = len(ckpt_names) - save_total_limit
+        # delete the oldest checkpoints that aren't the best or the most recent
+        to_delete = [
+            name
+            for name in ckpt_names[:-1]
+            if name != checkpoint_name(best_step) and name
+        ][:num_to_delete]
+        for name in to_delete:
+            ckpt_names.remove(name)
+            os.remove(name)
+
+    def update_best():
+        nonlocal best_eval, best_step
+        if load_best_model_at_end:
+            current_eval = eval_metrics[metric_for_best_model]
+            if (greater_is_better and current_eval > best_eval) or (
+                not greater_is_better and current_eval < best_eval
+            ):
+                assert os.path.exists(checkpoint_name(step)), (
+                    "No checkpoint found "
+                    "for the current step, "
+                    "but load_best_model_at_end was set to True and the current step is "
+                    "best. Please set save_every to a multiple of eval_every."
+                )
+                best_eval = current_eval
+                best_step = step
+                print(f"New best model found at step {step}")
 
     # If the model is wrapped by DataParallel, it doesn't have a device. In this case,
     # we use GPU 0 as the output device. This sadly means that this device will store
@@ -125,8 +166,14 @@ def train_model(
         for start in range(0, len(ds), batch_size):
             loss_tot = 0
 
+            # save
+            if save_every and step % save_every == 0 and save_every < nsteps:
+                ckpt_names.append(checkpoint_name(step))
+                save(model, ckpt_names[-1])
+                delete_old_checkpoints()
+
             # eval
-            if eval_every and (step + 1) % eval_every == 0:
+            if eval_every and step % eval_every == 0 and eval_every < nsteps:
                 assert (
                     eval_ds is not None
                 ), "must provide eval_ds if eval_every is not None"
@@ -148,12 +195,9 @@ def train_model(
                         if hasattr(model, "gradient_checkpointing_enable")
                         else model.module
                     ).gradient_checkpointing_enable()
-                if train_with_dropout:
-                    model.train()
+                model.train(mode=train_with_dropout)
 
-            # save
-            if save_every and (step + 1) % save_every == 0:
-                save(model, save_path, optimizer, lr_scheduler)
+                update_best()
 
             # train step
             all_logits = []
@@ -196,7 +240,6 @@ def train_model(
             )[:, 1]
             supervision_soft_labels = np.array(all_labels.cpu())[:, 1]
 
-            is_w2s = "gt_soft_label" in ds.features
             if is_w2s:
                 # then supervision labels are weak
                 gt_soft_labels = np.array(
@@ -246,6 +289,12 @@ def train_model(
             step += 1
             logger.dumpkvs()
 
+    # save final checkpoint
+    if save_every and checkpoint_name(step) not in ckpt_names:
+        ckpt_names.append(checkpoint_name(step))
+        save(model, ckpt_names[-1])
+        delete_old_checkpoints()
+
     # final eval
     final_eval_results = None
     if eval_every:
@@ -264,12 +313,40 @@ def train_model(
             final_eval_results.save_to_disk(
                 os.path.join(save_path, "eval_results_final")
             )
+        eval_metrics = final_eval_metrics
+        update_best()
 
-    # save final model
+    # load and and save best model
+    if load_best_model_at_end and best_step != step:
+        print(f"Loading best model from step {best_step}")
+        assert best_step is not None
+        assert maybe_load_model(model, checkpoint_name(best_step)), (
+            "Failed to load " "the best model."
+        )
     if save_every:
-        save(model, save_path, optimizer, lr_scheduler)
+        assert (
+            save_path is not None
+        ), "save_path must not be None if save_every is not None"
+        ckpt_names.append(os.path.join(save_path, "pytorch_model.bin"))
+        save(model, ckpt_names[-1])
+        delete_old_checkpoints()
 
+    print("done.")
     return final_eval_results, final_eval_metrics
+
+
+def maybe_load_model(model, checkpoint_path, disable=False):
+    if os.path.exists(checkpoint_path) and not disable:
+        state_dict = torch.load(checkpoint_path)
+        state_dict = {
+            k.replace("transformer.module", "transformer"): v
+            for (k, v) in state_dict.items()
+        }
+        (model if hasattr(model, "load_state_dict") else model.module).load_state_dict(
+            state_dict
+        )
+        return True
+    return False
 
 
 def train_and_save_model(
@@ -292,6 +369,10 @@ def train_and_save_model(
     optimizer_name: str = "adam",
     eval_every: Optional[int] = None,
     save_every: Optional[int] = None,
+    load_best_model_at_end: bool = False,
+    metric_for_best_model: str = "eval/auroc",
+    greater_is_better: bool = True,
+    save_total_limit: Optional[int] = 1,
 ) -> tuple:
     if eval_batch_size is None:
         eval_batch_size = batch_size
@@ -307,24 +388,8 @@ def train_and_save_model(
 
     print(f"{get_gpu_mem_used() * 100:.2f}% of all GPU memory in use before training")
 
-    def maybe_load_model(model):
-        checkpoint_path = os.path.join(save_path, "pytorch_model.bin")
-        if os.path.exists(checkpoint_path) and not force_retrain:
-            print("loading from", save_path)
-            if not os.path.exists(checkpoint_path):
-                # Assume this means we have a sharded checkpoint, and load it appropriately
-                load_sharded_checkpoint(model, checkpoint_path)
-            else:
-                state_dict = torch.load(checkpoint_path)
-                state_dict = {
-                    k.replace("transformer.module", "transformer"): v
-                    for (k, v) in state_dict.items()
-                }
-                custom_kwargs["state_dict"] = state_dict
-            return True
-        return False
-
     already_trained = False
+    checkpoint_path = os.path.join(save_path, "pytorch_model.bin")
     # Load the model
     if model_config.model_parallel:
         assert (
@@ -339,7 +404,7 @@ def train_and_save_model(
             linear_probe=linear_probe,
             **custom_kwargs,
         )
-        already_trained = maybe_load_model(model)
+        already_trained = maybe_load_model(model, checkpoint_path, force_retrain)
         minibatch_size = minibatch_size_per_replica
     else:
         model = TransformerWithHead.from_pretrained(
@@ -352,7 +417,7 @@ def train_and_save_model(
         ).to(
             "cuda"  # type: ignore
         )
-        already_trained = maybe_load_model(model)
+        already_trained = maybe_load_model(model, checkpoint_path, force_retrain)
         # data parallel:  currently not supported with model parallel
         if torch.cuda.device_count() > 1:
             model = torch.nn.DataParallel(model, output_device=0)
@@ -376,7 +441,7 @@ def train_and_save_model(
             model,
             test_ds,
             eval_batch_size,
-            metric_prefix="test",
+            metric_prefix="eval",
             remove_large_columns=False,
         )
     else:
@@ -398,6 +463,10 @@ def train_and_save_model(
             lr_schedule=lr_schedule,
             optimizer_name=optimizer_name,
             save_every=save_every,
+            load_best_model_at_end=load_best_model_at_end,
+            metric_for_best_model=metric_for_best_model,
+            greater_is_better=greater_is_better,
+            save_total_limit=save_total_limit,
         )
         print("Model training took", time.time() - start, "seconds")
 
