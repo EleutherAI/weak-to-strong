@@ -3,6 +3,7 @@ import pickle
 import time
 from typing import Callable, Optional
 
+import bitsandbytes as bnb
 import datasets
 import numpy as np
 import torch
@@ -102,6 +103,12 @@ def train_model(
     trainable_params = [p for p in model.parameters() if p.requires_grad]
     if optimizer_name.lower() == "adam":
         optimizer = torch.optim.Adam(trainable_params, lr=lr, betas=(0.9, 0.95))
+    elif optimizer_name.lower() == "adam_bnb_8bit":
+        assert model.lora_modules is not None, (
+            "Using 8bit Adam with full finetuning "
+            "(specifically finetuning the embedding layer) is not supported. "
+        )
+        optimizer = bnb.optim.Adam8bit(trainable_params, lr=lr, betas=(0.9, 0.95))
     elif optimizer_name.lower() == "adafactor":
         optimizer = toptim.Adafactor(trainable_params, lr=lr)
     else:
@@ -120,7 +127,7 @@ def train_model(
     accuracies = []
     aurocs = []
     best_eval = float("-inf") if greater_is_better else float("inf")
-    best_step = None
+    best_step = 0 if load_best_model_at_end else None
     ckpt_names = []
 
     def delete_old_checkpoints():
@@ -335,11 +342,7 @@ def train_model(
 def maybe_load_model(model, checkpoint_path, disable=False):
     if os.path.exists(checkpoint_path) and not disable:
         state_dict = torch.load(checkpoint_path)
-        state_dict = {
-            k.replace("transformer.module", "transformer"): v
-            for (k, v) in state_dict.items()
-        }
-        (model if hasattr(model, "load_state_dict") else model.module).load_state_dict(
+        (model.module if hasattr(model, "module") else model).load_state_dict(
             state_dict
         )
         return True
@@ -434,6 +437,7 @@ def train_and_save_model(
             minibatch_size = minibatch_size_per_replica
 
     if already_trained:
+        print("Model already trained, skipping training")
         test_results, test_metrics = eval_loop(
             model,
             test_ds,

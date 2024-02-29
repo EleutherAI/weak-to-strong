@@ -85,28 +85,27 @@ class TransformerWithHead(PreTrainedModel):
 
     @property
     def modules_to_save(self):
-        save_modules: list = [
-            m for m in self.transformer.modules() if isinstance(m, LoraLayer)
-        ]
+        save_modules: list = [m for m in self.lm.modules() if isinstance(m, LoraLayer)]
         if self.score is not None:
             save_modules.append(self.score)
         return save_modules
 
     def save_state_dict(self, path):
-        # only save lora parameters
         if self.lora_modules is None:
-            save_dict = self.state_dict()
+            save_dict_or_list = self.state_dict()
         else:
-            save_dict = {}
-            for m in self.modules_to_save:
-                save_dict.update(m.state_dict())
-        torch.save(save_dict, path)
+            # only save lora parameters
+            save_dict_or_list = [m.state_dict() for m in self.modules_to_save]
+        torch.save(save_dict_or_list, path)
 
     def load_state_dict(self, state_dict, strict=True, assign=True):
-        if self.lora_modules is not None:
+        if self.lora_modules is None:
             return super().load_state_dict(state_dict, strict, assign)
         else:
-            for m, sd in zip(self.modules_to_save, state_dict):
+            assert isinstance(state_dict, list)
+            modules_to_save = self.modules_to_save
+            assert len(state_dict) == len(modules_to_save)
+            for m, sd in zip(modules_to_save, state_dict):
                 m.load_state_dict(sd, strict, assign)
 
     def gradient_checkpointing_enable(self):

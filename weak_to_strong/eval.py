@@ -129,7 +129,7 @@ def compute_metrics(
         metrics_against_target = {
             "acc": float(accs.mean()),
             "acc_std_err": float(np.std(accs) / np.sqrt(len(accs))),
-            "auroc": float(roc_auc_score(target_hard_labels, pred_probs)),
+            "auroc": float(roc_auc_score_or_nan(target_hard_labels, pred_probs)),
         }
 
         for metric in [
@@ -194,6 +194,13 @@ def confident_disagreement_rate(
     CDR_std_err = np.sqrt(CDR * (1 - CDR) / num_confident_predictions)
 
     return {"CDR": float(CDR), "CDR_std_err": float(CDR_std_err)}
+
+
+def roc_auc_score_or_nan(y_true, y_score):
+    try:
+        return roc_auc_score(y_true, y_score)
+    except ValueError:
+        return np.nan
 
 
 def expected_overconfidence_error(
