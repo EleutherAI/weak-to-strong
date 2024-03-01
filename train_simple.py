@@ -270,6 +270,7 @@ def main(
         )
         if os.path.exists(weak_test_results_path):
             weak_test_results = load_from_disk(weak_test_results_path)
+            # the last minibatch is dropped, so we don't have weak test results for it
             test_ds = test_ds.select(range(len(weak_test_results))).add_column(
                 "weak_soft_label", weak_test_results["soft_pred"]
             )  # type: ignore

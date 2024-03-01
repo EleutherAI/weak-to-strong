@@ -33,12 +33,6 @@ lora_modules:
     - q_proj
     - v_proj
 
-# Some models require additional packages to be installed
-required_packages:
-  qwen: &qwen_required_packages
-    - tiktoken
-    - einops
-
 models:
   - name: gpt2
     memory: 5.5e8
@@ -186,7 +180,6 @@ models:
     memory: 3.67e9
     eval_batch_size: 8
     lora_modules: *llama_mistral_qwen_modules
-    required_packages: *qwen_required_packages
     custom_kwargs:
       trust_remote_code: true
       revision: 5fde88dff770a7d036847211f5d9d9705f0caa69
@@ -195,7 +188,6 @@ models:
     memory: 1.6e10
     eval_batch_size: 8
     lora_modules: *llama_mistral_qwen_modules
-    required_packages: *qwen_required_packages
     custom_kwargs:
       trust_remote_code: true
       revision: d4efd21e866b9cb3466cb65b963933f5e98016d1
@@ -204,7 +196,6 @@ models:
     memory: 3e10
     eval_batch_size: 8
     lora_modules: *llama_mistral_qwen_modules
-    required_packages: *qwen_required_packages
     custom_kwargs:
       trust_remote_code: true
       revision: 8be2854218fea9054331e217fd26a06f3fd02004
