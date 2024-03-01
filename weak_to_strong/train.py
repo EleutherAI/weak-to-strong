@@ -3,7 +3,6 @@ import pickle
 import time
 from typing import Callable, Optional
 
-import bitsandbytes as bnb
 import datasets
 import numpy as np
 import torch
@@ -103,12 +102,6 @@ def train_model(
     trainable_params = [p for p in model.parameters() if p.requires_grad]
     if optimizer_name.lower() == "adam":
         optimizer = torch.optim.Adam(trainable_params, lr=lr, betas=(0.9, 0.95))
-    elif optimizer_name.lower() == "adam_bnb_8bit":
-        assert model.lora_modules is not None, (
-            "Using 8bit Adam with full finetuning "
-            "(specifically finetuning the embedding layer) is not supported. "
-        )
-        optimizer = bnb.optim.Adam8bit(trainable_params, lr=lr, betas=(0.9, 0.95))
     elif optimizer_name.lower() == "adafactor":
         optimizer = toptim.Adafactor(trainable_params, lr=lr)
     else:
