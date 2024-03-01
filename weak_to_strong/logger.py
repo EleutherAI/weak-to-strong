@@ -1,6 +1,5 @@
 import json
 import os
-from datetime import datetime
 from typing import Optional
 
 import wandb
@@ -18,24 +17,14 @@ class WandbLogger(object):
 
     def __init__(
         self,
-        **kwargs,
+        save_path: str,
+        wandb_args: dict,
     ):
-        project = os.environ.get("WANDB_PROJECT")
-        self.use_wandb = project is not None
-        if self.use_wandb:
-            wandb.init(
-                config=kwargs,
-                project=project,
-                name=kwargs["name"].format(
-                    **kwargs, datetime_now=datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
-                )
-                if "name" in kwargs
-                else None,
-            )
-        if "save_path" in kwargs:
-            self.log_path = os.path.join(kwargs["save_path"], "log.jsonl")
-            if not os.path.exists(kwargs["save_path"]):
-                os.makedirs(kwargs["save_path"])
+        wandb.init(**wandb_args)
+
+        self.log_path = os.path.join(save_path, "log.jsonl")
+        if not os.path.exists(save_path):
+            os.makedirs(save_path)
         self._log_dict = {}
 
     def logkv(self, key, value):
@@ -45,15 +34,13 @@ class WandbLogger(object):
         self._log_dict.update(d)
 
     def dumpkvs(self):
-        if self.use_wandb:
-            wandb.log(self._log_dict)
+        wandb.log(self._log_dict)
         if self.log_path is not None:
             append_to_jsonl(self.log_path, self._log_dict)
         self._log_dict = {}
 
     def shutdown(self):
-        if self.use_wandb:
-            wandb.finish()
+        wandb.finish()
 
 
 def is_configured():

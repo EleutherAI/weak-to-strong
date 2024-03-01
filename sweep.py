@@ -1,5 +1,6 @@
 from train_simple import main as train_simple_main
 from typing import List, Union, Optional
+import traceback
 
 import fire
 
@@ -71,6 +72,7 @@ def main(
             )
         except Exception as e:
             print(f"Failed to run ground truth {model_size}: {e}")
+            traceback.print_exc()
 
     print("Running transfer models")
     for weak_model_size, strong_model_size in weak_to_strong_model_sizes:
@@ -85,6 +87,7 @@ def main(
             print(
                 f"Failed to run weak {weak_model_size} to strong {strong_model_size}: {e}"
             )
+            traceback.print_exc()
     print("Finished running all models")
 
 

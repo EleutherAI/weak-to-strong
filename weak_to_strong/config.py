@@ -92,6 +92,7 @@ class ModelConfig:
         default_optimizer: str = "adam",
         torch_dtype: Optional[str] = None,
     ):
+        assert name is not None
         memory = float(memory)
         custom_kwargs = custom_kwargs or {}
         per_device_ram = torch.cuda.get_device_properties(0).total_memory
@@ -114,7 +115,8 @@ class ModelConfig:
         memory_util_est = memory
         if custom_kwargs["torch_dtype"] == torch.float32:
             memory_util_est *= 2
-        # NOTE: this memory estimate doesn't account for the optimizer, LoRA, checkpointing, etc.
+        # NOTE: this memory estimate doesn't account for the
+        # optimizer, LoRA, checkpointing, seq len, batch size, etc.
 
         if model_parallel is None:
             model_parallel = (
@@ -137,9 +139,8 @@ class ModelConfig:
         self.default_optimizer = default_optimizer
 
 
-MODELS_DICT: dict[str, ModelConfig] = {
-    cfg["name"]: ModelConfig(**cfg)
-    for cfg in load_config("configs/models.yaml")["models"]
+MODELS_DICT: dict[str, dict] = {
+    cfg["name"]: cfg for cfg in load_config("configs/models.yaml")["models"]
 }
 
 

@@ -2,6 +2,7 @@ import functools
 from dataclasses import dataclass
 from random import Random
 from typing import Any, Callable, Optional
+import hashlib
 
 from datasets import (
     Dataset as HfDataset,
@@ -71,7 +72,8 @@ def load_and_process_dataset(
         )
         ds = ds.map(
             lambda ex: {
-                "soft_label": [1 - float(ex["hard_label"]), float(ex["hard_label"])]
+                "id": hashlib.sha1(ex["txt"].encode()).hexdigest()[:8],
+                "soft_label": [1 - float(ex["hard_label"]), float(ex["hard_label"])],
             }
         )
         ds = ds.shuffle(seed=seed)  # shuffling a bit pointless for test set but wtv

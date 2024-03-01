@@ -7,11 +7,15 @@ from typing import Optional
 import fire
 import numpy as np
 from datasets import load_from_disk
-import wandb
 
 import weak_to_strong.logger as logger
 from weak_to_strong.common import get_tokenizer, clear_mem, get_gpu_mem_used
-from weak_to_strong.config import MODELS_DICT, get_config_foldername, loss_dict
+from weak_to_strong.config import (
+    MODELS_DICT,
+    ModelConfig,
+    get_config_foldername,
+    loss_dict,
+)
 from weak_to_strong.datasets import (
     VALID_DATASETS,
     tokenize_dataset,
@@ -57,14 +61,22 @@ def main(
     sweep_subfolder: str = "default",
     # Set to a very large value so that by default we don't do any intermediate evals but
     # still do final evals (which requires eval_every to be set to a non-zero, non-None value).
-    # Grount-truth fine-tuning does not do any intermediate evals.
     w2s_eval_every: int = 10000000,
+    gt_eval_every: int = 10000000,
     # If set, this command will be run to sync the results to remote storage
     # non-positive values mean we don't save any checkpoints
     sync_command: Optional[str] = None,
     save_every: int = 1000000,
     skip_inference: bool = False,
     skip_if_exists: bool = False,
+    # Similar to HF trainer load_best_model_at_end behavior
+    # https://huggingface.co/docs/transformers/main_classes/trainer
+    load_best_model_at_end: bool = False,
+    # using the "against_supervision" suffix will ensure that the metric is measured
+    # against whatever labeler was used to train the model, whether weak or strong
+    metric_for_best_model: str = "eval/auroc_against_supervision",
+    greater_is_better: bool = True,
+    save_total_limit: Optional[int] = 1,
 ):
     # try to clean up memory
     clear_mem()
@@ -76,12 +88,12 @@ def main(
     assert (
         weak_model_size is None or weak_labels_path is None
     ), "Can't pass both weak_model_size and weak_labels_path"
-    model_config = MODELS_DICT[model_size]
+    model_config = ModelConfig(**MODELS_DICT[model_size])
     if model_config.model_parallel:
         print(f"Using model parallelism for {model_size}")
 
     is_w2s = weak_labels_path is not None or weak_model_size is not None
-    eval_every = w2s_eval_every if is_w2s else 10000000
+    eval_every = w2s_eval_every if is_w2s else gt_eval_every
     epochs = w2s_epochs if is_w2s else gt_epochs
     loss = loss if is_w2s else "xent"
 
@@ -127,9 +139,13 @@ def main(
         "lr_schedule": lr_schedule,
         # "save_every": save_every,
         # "sweep_subfolder": sweep_subfolder,
+        ("w2s_eval_every" if is_w2s else "gt_eval_every"): eval_every,
+        "load_best_model_at_end": load_best_model_at_end,
+        "metric_for_best_model": metric_for_best_model,
+        "greater_is_better": greater_is_better,
+        "save_total_limit": save_total_limit,
     }
     if is_w2s:
-        config["strong_eval_every"] = w2s_eval_every
         config["w2s_lr_factor"] = w2s_lr_factor
 
     if weak_model_size is not None:
@@ -137,11 +153,12 @@ def main(
         weak_model_config["model_size"] = weak_model_size
         weak_model_config["loss"] = "xent"
         del weak_model_config["w2s_epochs"]
-        del weak_model_config["strong_eval_every"]
+        del weak_model_config["w2s_eval_every"]
         del weak_model_config["w2s_lr_factor"]
         weak_model_config["gt_epochs"] = gt_epochs
+        weak_model_config["gt_eval_every"] = gt_eval_every
         weak_model_config["lr"] = (
-            MODELS_DICT[weak_model_size].default_lr
+            ModelConfig(**MODELS_DICT[weak_model_size]).default_lr
             if use_model_default_lr
             else lr / w2s_lr_factor
         )
@@ -199,7 +216,16 @@ def main(
                 raise RuntimeError(
                     f"Sync command failed with return code {result.returncode}"
                 )
-        train1_ds = load_from_disk(weak_labels_path)
+
+        # take the predictions from the weak model to be the labels
+        train1_ds = load_from_disk(weak_labels_path).rename_columns(
+            {
+                "hard_label": "gt_hard_label",
+                "soft_label": "gt_soft_label",
+                "hard_pred": "hard_label",
+                "soft_pred": "soft_label",
+            }
+        )
         train2_ds = None
 
         weak_model_config = json.load(
@@ -210,26 +236,24 @@ def main(
         config["weak_model"] = weak_model_config
 
     save_path = os.path.join(results_folder, sweep_subfolder, config_name)
-    logger.configure(
-        name="{sweep_subfolder}_{config_name}_{datetime_now}",
-        save_path=save_path,
-        sweep_subfolder=sweep_subfolder,
-        config_name=config_name,
-    )
+
     if (
         os.path.exists(os.path.join(save_path, "results_summary.json"))
         and skip_if_exists
     ):
         print(f"Skipping {save_path} because it already exists")
         return
-    wandb.init(
-        project="weak-to-strong",
-        config=config,
-        group=sweep_subfolder,
-        job_type="gt" if weak_labels_path is None else "w2s",
-        name=f"{model_size.split('/')[-1]}_{ds_name}_{loss}",
-        dir=results_folder,
-        reinit=True,
+
+    logger.configure(
+        save_path=save_path,
+        wandb_args=dict(
+            project="weak-to-strong",
+            config=config,
+            group=sweep_subfolder,
+            job_type="gt" if weak_labels_path is None else "w2s",
+            name=f"{model_size.split('/')[-1]}_{ds_name}_{loss}",
+            dir=results_folder,
+        ),
     )
 
     # Tokenize datasets
@@ -238,6 +262,24 @@ def main(
     test_ds = tokenize_dataset(test_ds, tokenizer, max_ctx)  # type: ignore
     if train2_ds:
         train2_ds = tokenize_dataset(train2_ds, tokenizer, max_ctx)
+
+    # try to add a weak_labels column to the test dataset if running w2s
+    if weak_labels_path is not None:
+        weak_test_results_path = weak_labels_path.replace(
+            "weak_labels", "eval_results_final"
+        )
+        if os.path.exists(weak_test_results_path):
+            weak_test_results = load_from_disk(weak_test_results_path)
+            # the last minibatch is dropped, so we don't have weak test results for it
+            test_ds = test_ds.select(range(len(weak_test_results))).add_column(
+                "weak_soft_label", weak_test_results["soft_pred"]
+            )  # type: ignore
+            assert test_ds["id"] == weak_test_results["id"], "IDs don't match"
+        else:
+            print(
+                f"No weak test results at {weak_test_results_path}, "
+                "some metrics will not be logged."
+            )
 
     loss_fn = loss_dict[loss]
     print(f"Training model {model_size}")
@@ -260,6 +302,10 @@ def main(
         optimizer_name=optim,
         eval_every=eval_every,
         save_every=save_every,
+        load_best_model_at_end=load_best_model_at_end,
+        metric_for_best_model=metric_for_best_model,
+        greater_is_better=greater_is_better,
+        save_total_limit=save_total_limit,
     )
 
     if weak_ds is not None:
