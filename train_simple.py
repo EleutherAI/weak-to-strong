@@ -14,7 +14,7 @@ from weak_to_strong.config import (
     MODELS_DICT,
     ModelConfig,
     get_config_foldername,
-    loss_dict,
+    LOSS_DICT,
 )
 from weak_to_strong.datasets import (
     VALID_DATASETS,
@@ -281,7 +281,7 @@ def main(
                 "some metrics will not be logged."
             )
 
-    loss_fn = loss_dict[loss]
+    loss_fn = LOSS_DICT[loss]
     print(f"Training model {model_size}")
     test_results, weak_ds = train_and_save_model(
         model_config,

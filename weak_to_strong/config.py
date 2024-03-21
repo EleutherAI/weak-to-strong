@@ -1,3 +1,4 @@
+import os
 import torch
 from typing import Optional
 
@@ -140,18 +141,21 @@ class ModelConfig:
 
 
 MODELS_DICT: dict[str, dict] = {
-    cfg["name"]: cfg for cfg in load_config("configs/models.yaml")["models"]
+    cfg["name"]: cfg
+    for cfg in load_config(
+        os.path.join(os.path.dirname(os.path.dirname(__file__)), "configs/models.yaml")
+    )["models"]
 }
 
 
-loss_dict = {
+LOSS_DICT = {
     "logconf": logconf_loss_fn(),
     "product": product_loss_fn(),
     "xent": xent_loss(),
     "kl": kl_loss(),
 }
 
-VALID_LOSSES: list[str] = list(loss_dict.keys())
+VALID_LOSSES: list[str] = list(LOSS_DICT.keys())
 
 
 def get_config_foldername(config: dict) -> str:

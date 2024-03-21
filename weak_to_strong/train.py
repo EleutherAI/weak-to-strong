@@ -377,7 +377,6 @@ def train_and_save_model(
     use_lm_head = "choice_input_ids" in train_ds.features
 
     gradient_checkpointing = model_config.gradient_checkpointing
-    custom_kwargs = model_config.custom_kwargs or {}
 
     print(f"{get_gpu_mem_used() * 100:.2f}% of all GPU memory in use before training")
 
@@ -395,7 +394,7 @@ def train_and_save_model(
             num_labels=2,
             device_map="auto",
             linear_probe=linear_probe,
-            **custom_kwargs,
+            **model_config.custom_kwargs,
         )
         already_trained = maybe_load_model(model, checkpoint_path, force_retrain)
         minibatch_size = minibatch_size_per_replica
@@ -406,7 +405,7 @@ def train_and_save_model(
             use_lm_head=use_lm_head,
             num_labels=2,
             linear_probe=linear_probe,
-            **custom_kwargs,
+            **model_config.custom_kwargs,
         ).to(
             "cuda"  # type: ignore
         )
