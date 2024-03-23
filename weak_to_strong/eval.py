@@ -72,6 +72,8 @@ def eval_loop(
                 del r["txt"]
             if "weak_soft_label" in batch:
                 r["weak_soft_label"] = batch["weak_soft_label"]
+            if "choice_input_ids" in batch:
+                r["choice_input_ids"] = batch["choice_input_ids"]
             results.extend([dict(zip(r, t)) for t in zip(*r.values())])
 
         # compute metrics

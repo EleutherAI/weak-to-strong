@@ -77,6 +77,7 @@ def main(
     metric_for_best_model: str = "eval/auroc_against_supervision",
     greater_is_better: bool = True,
     save_total_limit: Optional[int] = 1,
+    disable_lora: bool = False,
 ):
     # try to clean up memory
     clear_mem()
@@ -88,14 +89,18 @@ def main(
     assert (
         weak_model_size is None or weak_labels_path is None
     ), "Can't pass both weak_model_size and weak_labels_path"
-    model_config = ModelConfig(**MODELS_DICT[model_size])
-    if model_config.model_parallel:
-        print(f"Using model parallelism for {model_size}")
 
     is_w2s = weak_labels_path is not None or weak_model_size is not None
     eval_every = w2s_eval_every if is_w2s else gt_eval_every
     epochs = w2s_epochs if is_w2s else gt_epochs
     loss = loss if is_w2s else "xent"
+
+    mcfg = MODELS_DICT[model_size].copy()
+    if disable_lora:
+        del mcfg["lora_modules"]
+    model_config = ModelConfig(**mcfg)
+    if model_config.model_parallel:
+        print(f"Using model parallelism for {model_size}")
 
     # this is per device!
     if minibatch_size_per_replica is None:
@@ -144,6 +149,7 @@ def main(
         "metric_for_best_model": metric_for_best_model,
         "greater_is_better": greater_is_better,
         "save_total_limit": save_total_limit,
+        "disable_lora": disable_lora,
     }
     if is_w2s:
         config["w2s_lr_factor"] = w2s_lr_factor

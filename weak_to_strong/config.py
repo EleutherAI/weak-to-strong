@@ -108,9 +108,7 @@ class ModelConfig:
             custom_kwargs["torch_dtype"] = torch.bfloat16
         if (
             not torch.cuda.is_bf16_supported() or lora_modules is None
-        ) and custom_kwargs[  # we enforce fp32 for full finetuning
-            "torch_dtype"
-        ] == torch.bfloat16:
+        ) and custom_kwargs["torch_dtype"] == torch.bfloat16:
             custom_kwargs["torch_dtype"] = torch.float32
         self.name = name
         memory_util_est = memory

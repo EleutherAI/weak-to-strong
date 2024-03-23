@@ -135,6 +135,7 @@ models:
 
   - name: Qwen/Qwen1.5-0.5B
     memory: 1.2e9
+    eval_batch_size: 16
     lora_modules: *llama_mistral_qwen_modules
     custom_kwargs:
       trust_remote_code: true

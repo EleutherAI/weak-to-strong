@@ -167,6 +167,15 @@ def hf_loader(*hf_name, split_names=None, n_test=None):
     return lambda split: hf_load_dataset(*hf_name, split=split_names.get(split, split))
 
 
+def sciq_with_support_loader(*hf_name, split_names=None, n_test=None):
+    """
+    Wraps hf_loader by filtering out examples without support
+    """
+    base_loader = hf_loader(*hf_name, split_names=split_names, n_test=n_test)
+
+    return lambda split: base_loader(split).filter(lambda x: x["support"] != "")
+
+
 ##########
 # ACTUAL DATASETS
 ##########
@@ -263,7 +272,7 @@ def format_sciq_for_lm_head_with_support(ex, rng):
 register_dataset(
     "sciq_for_lm_head_with_support",
     DatasetConfig(
-        loader=hf_loader("sciq", n_test=SCIQ_N_TEST),  # type: ignore
+        loader=sciq_with_support_loader("sciq", n_test=SCIQ_N_TEST),  # type: ignore
         formatter=format_sciq_for_lm_head_with_support,  # type: ignore
     ),
 )
@@ -284,7 +293,7 @@ def format_sciq_with_support(ex, rng):
 register_dataset(
     "sciq_with_support",
     DatasetConfig(
-        loader=hf_loader("sciq", n_test=SCIQ_N_TEST),  # type: ignore
+        loader=sciq_with_support_loader("sciq", n_test=SCIQ_N_TEST),  # type: ignore
         formatter=format_sciq_with_support,  # type: ignore
     ),
 )

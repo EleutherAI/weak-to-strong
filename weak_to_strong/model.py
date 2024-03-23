@@ -118,6 +118,7 @@ class TransformerWithHead(PreTrainedModel):
         self,
         input_ids: torch.LongTensor,
         choice_input_ids: Optional[torch.LongTensor] = None,
+        output_hidden_states: bool = False,
     ):
         """
         Forward pass of the model with a linear head.
@@ -132,14 +133,16 @@ class TransformerWithHead(PreTrainedModel):
 
         if self.score is None:  # use LM head
             assert choice_input_ids is not None
-            all_logits = self.lm(input_ids).logits
+            outputs = self.lm(input_ids, output_hidden_states=True)
+            all_logits = outputs.logits
+            all_hidden_states = outputs.hidden_states
             logits_at_last = [
                 all_logits[i, input_lens[i] - 1, choice_input_ids[i]]
                 for i in range(len(input_lens))
             ]  # [batch_size, num_choices]
             logits = torch.stack(logits_at_last)
         else:  # use learned head
-            transformer_outputs = self.transformer(input_ids)
+            transformer_outputs = self.transformer(input_ids, output_hidden_states=True)
             hidden_states = torch.stack(
                 [
                     transformer_outputs[0][i, input_lens[i] - 1, :]
@@ -150,5 +153,8 @@ class TransformerWithHead(PreTrainedModel):
             if self.linear_probe:
                 hidden_states = hidden_states.detach()
             logits = self.score(hidden_states)
+            all_hidden_states = transformer_outputs.hidden_states
 
+        if output_hidden_states:
+            return logits, all_hidden_states
         return logits
