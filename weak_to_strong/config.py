@@ -114,8 +114,10 @@ class ModelConfig:
         memory_util_est = memory
         if custom_kwargs["torch_dtype"] == torch.float32:
             memory_util_est *= 2
+        if lora_modules is None:
+            memory_util_est *= 4
         # NOTE: this memory estimate doesn't account for the
-        # optimizer, LoRA, checkpointing, seq len, batch size, etc.
+        # optimizer, LoRA rank, checkpointing, seq len, batch size, etc.
 
         if model_parallel is None:
             model_parallel = (
