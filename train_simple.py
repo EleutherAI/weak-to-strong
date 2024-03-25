@@ -268,6 +268,9 @@ def main(
     test_ds = tokenize_dataset(test_ds, tokenizer, max_ctx)  # type: ignore
     if train2_ds:
         train2_ds = tokenize_dataset(train2_ds, tokenizer, max_ctx)
+    if "for_lm_head" in ds_name:
+        assert "choice_input_ids" in train1_ds.column_names
+        assert "choice_input_ids" in test_ds.column_names
 
     # try to add a weak_labels column to the test dataset if running w2s
     if weak_labels_path is not None:

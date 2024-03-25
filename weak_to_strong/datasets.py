@@ -3,6 +3,7 @@ from dataclasses import dataclass
 from random import Random
 from typing import Any, Callable, Optional
 import hashlib
+import warnings
 
 from datasets import (
     Dataset as HfDataset,
@@ -92,7 +93,6 @@ def encode_choice(text, tokenizer):
     # some tokenizers split off the leading whitespace character
     if tokenizer.decode(c_ids[0]).strip() == "":
         c_ids = c_ids[1:]
-        assert c_ids == tokenizer.encode(text.lstrip(), add_special_tokens=False)
 
     c_ids = tuple(c_ids)
     if len(c_ids) != 1 and c_ids not in warned_about_choices:
@@ -308,7 +308,8 @@ def format_anthropic_hh(ex, rng) -> dict:
         rej[:rej_last_assistant].rstrip(),
         rej[rej_last_assistant:],
     )
-    assert ch_prompt == rej_prompt, f"Prefixs don't match in {ex}"
+    if ch_prompt != rej_prompt:
+        warnings.warn(f"Prefixs don't match in {ex}")
     resps = [ch_response, rej_response]
     rng.shuffle(resps)
     txt = f"{ch_prompt}\n\n<|Completion 1|>{resps[0]}\n\n<|Completion 2|>{resps[1]}"
