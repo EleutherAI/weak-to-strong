@@ -125,7 +125,7 @@ def tokenize_dataset(
     """
 
     def process_function(ex):
-        toks = tokenizer(ex["txt"])
+        toks = tokenizer(ex["txt"], max_length=max_ctx, truncation=True)
         out = dict(
             input_ids=toks["input_ids"],
         )
@@ -137,10 +137,9 @@ def tokenize_dataset(
         return out
 
     ds = raw_ds.map(process_function, batched=False)
-    pre_len = len(ds)
-    ds = ds.filter(lambda x: len(x["input_ids"]) < max_ctx)
+    num_max_len = sum(len(x["input_ids"]) == max_ctx for x in ds)  # type: ignore
     print(
-        f"Filtered {100 * (1 - len(ds) / pre_len):.2f}% of examples for being too long"
+        f"{100 * num_max_len / len(ds):.2f}% of examples (truncated to) max length of {max_ctx}"
     )
     return ds
 

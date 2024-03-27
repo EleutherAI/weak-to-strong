@@ -24,7 +24,9 @@ def get_tokenizer(model_name: str):
     Returns:
     A tokenizer for the specified model.
     """
-    return AutoTokenizer.from_pretrained(model_name, trust_remote_code=True)
+    return AutoTokenizer.from_pretrained(
+        model_name, trust_remote_code=True, truncation_side="left"
+    )
 
 
 def clear_mem(verbose: bool = False):

@@ -68,7 +68,8 @@ class TransformerWithHead(PreTrainedModel):
             self.score = torch.nn.Linear(hidden_size, self.num_labels, bias=False).to(
                 lm_head.weight.dtype
             )
-            torch.nn.init.normal_(self.score.weight, std=0.0)
+            torch.nn.init.normal_(self.score.weight, std=1 / hidden_size**0.5)
+            del self.lm.lm_head  # remove the LM head
         self.linear_probe = linear_probe
 
     @property
@@ -84,7 +85,7 @@ class TransformerWithHead(PreTrainedModel):
         return cls(name, **kwargs)
 
     @property
-    def modules_to_save(self):
+    def lora_modules_to_save(self):
         save_modules: list = [m for m in self.lm.modules() if isinstance(m, LoraLayer)]
         if self.score is not None:
             save_modules.append(self.score)
@@ -95,7 +96,7 @@ class TransformerWithHead(PreTrainedModel):
             save_dict_or_list = self.state_dict()
         else:
             # only save lora parameters
-            save_dict_or_list = [m.state_dict() for m in self.modules_to_save]
+            save_dict_or_list = [m.state_dict() for m in self.lora_modules_to_save]
         torch.save(save_dict_or_list, path)
 
     def load_state_dict(self, state_dict, strict=True, assign=True):
@@ -103,7 +104,7 @@ class TransformerWithHead(PreTrainedModel):
             return super().load_state_dict(state_dict, strict, assign)
         else:
             assert isinstance(state_dict, list)
-            modules_to_save = self.modules_to_save
+            modules_to_save = self.lora_modules_to_save
             assert len(state_dict) == len(modules_to_save)
             for m, sd in zip(modules_to_save, state_dict):
                 m.load_state_dict(sd, strict, assign)
