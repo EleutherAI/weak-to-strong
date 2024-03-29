@@ -68,8 +68,14 @@ class TransformerWithHead(PreTrainedModel):
             self.score = torch.nn.Linear(hidden_size, self.num_labels, bias=False).to(
                 lm_head.weight.dtype
             )
-            torch.nn.init.normal_(self.score.weight, std=1 / hidden_size**0.5)
-            del self.lm.lm_head  # remove the LM head
+            torch.nn.init.normal_(self.score.weight, std=0.01 / hidden_size**0.5)
+            # remove the LM head so it isn't in model.parameters()
+            if hasattr(self.lm, "lm_head"):
+                del self.lm.lm_head
+            if hasattr(self.lm, "embed_out"):
+                del self.lm.embed_out
+            else:
+                print("Tried to remove LM head but it wasn't found.")
         self.linear_probe = linear_probe
 
     @property

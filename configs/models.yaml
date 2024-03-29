@@ -90,22 +90,27 @@ models:
     lora_modules: *gpt_neox_bloom_modules
 
   - name: facebook/opt-350m
+    default_lr: 1e-4
     memory: 6.6e8
     lora_modules: *opt_modules
 
   - name: facebook/opt-2.7b
+    default_lr: 1e-4
     memory: 5.5e9
     lora_modules: *opt_modules
 
   - name: facebook/opt-6.7b
+    default_lr: 1e-4
     memory: 1.4e10
     lora_modules: *opt_modules
 
   - name: facebook/opt-13b
+    default_lr: 1e-4
     memory: 2.6e10
     lora_modules: *opt_modules
 
   - name: facebook/opt-30b
+    default_lr: 1e-4
     memory: 6.5e10
     eval_batch_size: 8
     lora_modules: *opt_modules
@@ -174,6 +179,7 @@ models:
 
   - name: mistralai/Mistral-7B-v0.1
     memory: 1.5e10
+    default_lr: 1e-7
     eval_batch_size: 8
     lora_modules: *llama_mistral_qwen_modules
 

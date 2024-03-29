@@ -83,7 +83,7 @@ class ModelConfig:
         name: str,
         # memory, in bytes, of the model
         memory: float,
-        default_lr: float = 4e-5,
+        default_lr: float = 1e-5,
         eval_batch_size: int = 32,
         minibatch_size_per_replica: Optional[int] = None,
         lora_modules: Optional[list[str]] = None,
@@ -130,13 +130,13 @@ class ModelConfig:
         if minibatch_size_per_replica is None:
             minibatch_size_per_replica = eval_batch_size
         self.memory = memory
-        self.default_lr = default_lr
-        self.eval_batch_size = eval_batch_size
-        self.minibatch_size_per_replica = minibatch_size_per_replica
+        self.default_lr = float(default_lr)
+        self.eval_batch_size = int(eval_batch_size)
+        self.minibatch_size_per_replica = int(minibatch_size_per_replica)
         self.lora_modules = lora_modules
         self.custom_kwargs = custom_kwargs
-        self.gradient_checkpointing = gradient_checkpointing
-        self.model_parallel = model_parallel
+        self.gradient_checkpointing = bool(gradient_checkpointing)
+        self.model_parallel = bool(model_parallel)
         self.default_optimizer = default_optimizer
 
 
