@@ -26,7 +26,8 @@ from weak_to_strong.train import train_and_save_model
 
 def main(
     # training batch size (number of examples per update)
-    batch_size: int = 32,
+    gt_batch_size: int = 32,
+    w2s_batch_size: int = 32,
     max_ctx: int = 1024,
     ds_name: str = "sciq",
     loss: str = "kl",
@@ -94,6 +95,7 @@ def main(
     eval_every = w2s_eval_every if is_w2s else gt_eval_every
     epochs = w2s_epochs if is_w2s else gt_epochs
     loss = loss if is_w2s else "xent"
+    batch_size = w2s_batch_size if is_w2s else gt_batch_size
 
     mcfg = MODELS_DICT[model_size].copy()
     if disable_lora:
@@ -108,13 +110,16 @@ def main(
 
     use_model_default_lr = lr is None
     if use_model_default_lr:
-        assert batch_size == 32, (
-            "Learning rates were tuned on batch size 32, you probably want to sweep LR "
-            "if you are tuning batch size"
+        # NOTE: LRs are not super tuned but are best for bs=32,
+        # so we use a simple linear scaling otherwise
+        # https://stackoverflow.com/questions/53033556/how-should-the-learning-rate-change-as-the-batch-size-change
+        lr = model_config.default_lr * batch_size / 32
+        print(
+            f"Scaling learning rate linearly to {lr} based on batch size {batch_size}. "
+            "LRs were tuned for bs=32."
         )
-        lr = model_config.default_lr
     if is_w2s:
-        lr = lr * w2s_lr_factor  # don't modify in place
+        lr = lr * w2s_lr_factor
         print(
             f"Using learning rate {lr} ({w2s_lr_factor}x the default) for w2s training"
         )
@@ -134,7 +139,7 @@ def main(
         "model_size": model_size,
         "lr": lr,
         "optim": optim,
-        ("w2s_epochs" if is_w2s else "gt_epochs"): epochs,
+        "epochs": epochs,
         # "force_retrain": force_retrain,
         "seed": seed,
         # "minibatch_size_per_replica": minibatch_size_per_replica,
@@ -144,30 +149,26 @@ def main(
         "lr_schedule": lr_schedule,
         # "save_every": save_every,
         # "sweep_subfolder": sweep_subfolder,
-        ("w2s_eval_every" if is_w2s else "gt_eval_every"): eval_every,
+        "eval_every": eval_every,
         "load_best_model_at_end": load_best_model_at_end,
         "metric_for_best_model": metric_for_best_model,
         "greater_is_better": greater_is_better,
         "save_total_limit": save_total_limit,
         "disable_lora": disable_lora,
     }
-    if is_w2s:
-        config["w2s_lr_factor"] = w2s_lr_factor
 
     if weak_model_size is not None:
         weak_model_config = config.copy()
         weak_model_config["model_size"] = weak_model_size
         weak_model_config["loss"] = "xent"
-        del weak_model_config["w2s_epochs"]
-        del weak_model_config["w2s_eval_every"]
-        del weak_model_config["w2s_lr_factor"]
-        weak_model_config["gt_epochs"] = gt_epochs
-        weak_model_config["gt_eval_every"] = gt_eval_every
+        weak_model_config["epochs"] = gt_epochs
+        weak_model_config["eval_every"] = gt_eval_every
         weak_model_config["lr"] = (
             ModelConfig(**MODELS_DICT[weak_model_size]).default_lr
             if use_model_default_lr
             else lr / w2s_lr_factor
         )
+        weak_model_config["batch_size"] = gt_batch_size
 
         weak_model_config_name = get_config_foldername(weak_model_config)
 
