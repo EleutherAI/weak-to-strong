@@ -79,6 +79,7 @@ def main(
     greater_is_better: bool = True,
     save_total_limit: Optional[int] = 1,
     disable_lora: bool = False,
+    store_grads: bool = False,
 ):
     # try to clean up memory
     clear_mem()
@@ -96,6 +97,7 @@ def main(
     epochs = w2s_epochs if is_w2s else gt_epochs
     loss = loss if is_w2s else "xent"
     batch_size = w2s_batch_size if is_w2s else gt_batch_size
+    store_grads = store_grads and is_w2s
 
     mcfg = MODELS_DICT[model_size].copy()
     if disable_lora:
@@ -155,6 +157,7 @@ def main(
         "greater_is_better": greater_is_better,
         "save_total_limit": save_total_limit,
         "disable_lora": disable_lora,
+        "store_grads": store_grads,
     }
 
     if weak_model_size is not None:
@@ -169,6 +172,7 @@ def main(
             else lr / w2s_lr_factor
         )
         weak_model_config["batch_size"] = gt_batch_size
+        weak_model_config["store_grads"] = False
 
         weak_model_config_name = get_config_foldername(weak_model_config)
 
@@ -316,6 +320,7 @@ def main(
         metric_for_best_model=metric_for_best_model,
         greater_is_better=greater_is_better,
         save_total_limit=save_total_limit,
+        store_grads=store_grads,
     )
 
     if weak_ds is not None:

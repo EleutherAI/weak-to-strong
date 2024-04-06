@@ -15,6 +15,7 @@ from weak_to_strong.eval import eval_loop, compute_metrics
 from weak_to_strong.loss import kl_loss
 from weak_to_strong.model import TransformerWithHead
 from weak_to_strong.config import ModelConfig
+from weak_to_strong import grads
 
 
 def save(
@@ -54,6 +55,8 @@ def train_model(
     metric_for_best_model: str = "eval/auroc_against_supervision",
     greater_is_better: bool = True,
     save_total_limit: Optional[int] = 1,
+    store_grads: bool = False,
+    n_sems: int = 5,
 ):
     """
     ds is a dataset of examples, each of which is a dict with keys:
@@ -62,6 +65,13 @@ def train_model(
     - choice_input_ids (optional): a pair of token ids for the answer choices,
         indicating to use the LM head of the model
     """
+    is_w2s = "gt_soft_label" in ds.features
+    if store_grads:
+        minibatch_size = 1
+        print(
+            "Setting minibatch size to 1 for weak-to-strong training to compute examplewise grads"
+        )
+
     print(
         f"LR: {lr}, batch size: {batch_size}, mbatch size: {minibatch_size}, n: {len(ds)}"
     )
@@ -75,7 +85,6 @@ def train_model(
         ), "save_path must not be None if save_every is not None"
         return os.path.join(save_path, f"checkpoint_{step}.bin")
 
-    is_w2s = "gt_soft_label" in ds.features
     if metric_for_best_model.endswith("_against_supervision"):
         metric_for_best_model = metric_for_best_model.replace(
             "_against_supervision", "_against_weak" if is_w2s else ""
@@ -104,6 +113,8 @@ def train_model(
         optimizer = torch.optim.Adam(trainable_params, lr=lr, betas=(0.9, 0.95))
     elif optimizer_name.lower() == "adafactor":
         optimizer = toptim.Adafactor(trainable_params, lr=lr)
+    elif optimizer_name.lower() == "sgd":
+        optimizer = torch.optim.SGD(trainable_params, lr=lr)
     else:
         assert False, f"invalid optimizer {optimizer_name}, must be adam or adafactor"
     if lr_schedule == "cosine_anneal":
@@ -122,6 +133,8 @@ def train_model(
     best_eval = float("-inf") if greater_is_better else float("inf")
     best_step = 0 if load_best_model_at_end else None
     ckpt_names = []
+    per_step_expected_effects = []
+    initial_eval_outputs = None
 
     def delete_old_checkpoints():
         if save_total_limit is None:
@@ -160,8 +173,33 @@ def train_model(
     io_device = model.device if hasattr(model, "device") else 0
 
     for epoch in range(epochs):
-        for start in range(0, len(ds), batch_size):
+        for start in range(0, len(ds), batch_size):  # iterate over batches
             loss_tot = 0
+
+            # compute behaviorally relevant directions in parameter space
+            if store_grads:
+                assert eval_ds is not None, "must provide eval_ds if store_grads"
+                (
+                    downsampled_eval_jacobians,
+                    eval_outputs,
+                    proj_basis_indices,
+                    model_n_params,
+                ) = grads.get_jacobians(
+                    model=model,
+                    dataset=eval_ds,
+                    postprocess_logits_fn=grads.Diff(),
+                    target_label_column="soft_label",  # is not used
+                    d_proj=10_000,
+                    step_frac=step / nsteps,
+                    io_device=io_device,
+                )
+                downsampled_eval_jacobians = downsampled_eval_jacobians.to(io_device)
+                proj_basis_indices = proj_basis_indices.to(io_device)
+                d_down = len(proj_basis_indices)
+                if initial_eval_outputs is None:
+                    initial_eval_outputs = eval_outputs
+                # note that these jacobians have only 1 (squeezed) column
+                # so the overall shape is (n_eval, d_proj)
 
             # save
             if save_every and step % save_every == 0 and save_every < nsteps:
@@ -186,21 +224,25 @@ def train_model(
                     eval_results.save_to_disk(
                         os.path.join(save_path, f"eval_results_{step}")
                     )
-                if gradient_checkpointing:
-                    (
-                        model
-                        if hasattr(model, "gradient_checkpointing_enable")
-                        else model.module
-                    ).gradient_checkpointing_enable()
-                model.train(mode=train_with_dropout)
-
                 update_best()
+
+            if gradient_checkpointing:
+                (
+                    model
+                    if hasattr(model, "gradient_checkpointing_enable")
+                    else model.module
+                ).gradient_checkpointing_enable()
+            model.train(mode=train_with_dropout)
 
             # train step
             all_logits = []
             all_labels = []
-            for mbatch in to_batch(
-                ds, minibatch_size, start=start, end=start + batch_size
+            if store_grads:
+                downsampled_cumul_grads = torch.empty(
+                    (batch_size, d_down), device=io_device
+                )
+            for j, mbatch in enumerate(
+                to_batch(ds, minibatch_size, start=start, end=start + batch_size)
             ):
                 input_ids = (
                     torch.nn.utils.rnn.pad_sequence(
@@ -211,15 +253,81 @@ def train_model(
                 )
                 labels = torch.tensor(mbatch["soft_label"]).to(io_device)  # type: ignore
                 logits = model(
-                    input_ids, choice_input_ids=mbatch.get("choice_input_ids")
+                    input_ids=input_ids, choice_input_ids=mbatch.get("choice_input_ids")
                 ).to(io_device)
-                loss = loss_fn(logits, labels, step_frac=step / nsteps)
+                loss = loss_fn(logits, labels, step_frac=step / nsteps) * (
+                    minibatch_size / batch_size
+                )
                 loss_tot += loss.item()
                 # we don't need to use a gradscaler because we're using bf16 instead of fp16
                 loss.backward()
 
+                if store_grads:
+                    # dealing with Adam is awkward because the parameter updates are harder
+                    # to decompose into influences of individual examples
+                    assert optimizer_name.lower() == "sgd"
+                    assert minibatch_size == 1
+
+                    downsampled_cumul_grads[j, :] = grads.gather_grad_components(
+                        model, proj_basis_indices, io_device=io_device
+                    )
+
                 all_logits.extend(logits)
                 all_labels.extend(labels)
+
+            # gradients accumulate, so we need to take the difference at the end
+            if store_grads:
+                assert save_path is not None, "must provide save_path if store_grads"
+                downsampled_grads = downsampled_cumul_grads.diff(
+                    dim=0, prepend=downsampled_cumul_grads.new_zeros(1, d_down)
+                )
+
+                # compute expected effect on eval avg(|p_hat - soft_label|)
+                updates = -optimizer.param_groups[0]["lr"] * downsampled_grads
+                jvps = updates @ downsampled_eval_jacobians.mT  # [batch_size, n_eval]
+
+                # the computed JVP only includes d_down of the model_n_params terms,
+                # so we expect the actual JVP to be `rescale` times larger
+                rescale = model_n_params / d_down  # type: ignore
+                expected_effects = rescale * jvps
+
+                for est in range(n_sems):
+                    batch_idx = np.random.choice(batch_size, size=1, replace=False)
+                    eval_idx = np.random.choice(
+                        len(eval_outputs), size=1, replace=False
+                    )
+                    terms = (
+                        updates[batch_idx]
+                        * downsampled_eval_jacobians[eval_idx]
+                        * rescale
+                    )
+                    stderr = terms.std() * np.sqrt(len(terms))
+                    print(f"JVP est {est}: {terms.sum():f} +/- {stderr:f}")
+
+                tot_expected_effect = expected_effects.sum(0)
+                per_step_expected_effects.append(tot_expected_effect)
+
+                approx_new_outputs = tot_expected_effect + eval_outputs
+                minn, first, median, third, maxx = torch.quantile(
+                    approx_new_outputs, torch.tensor([0.0, 0.25, 0.5, 0.75, 1.0])
+                )
+                mean, std = approx_new_outputs.mean(), approx_new_outputs.std()
+                print(
+                    f"Approx new probs: min {minn:.3f}, 1st {first:.3f}, median {median:.3f}, "
+                    f"3rd {third:.3f}, max {maxx:.3f}, mean {mean:.3f}, std {std:.3f}"
+                )
+                torch.save(
+                    {
+                        "expected_effects": expected_effects,
+                        "proj_basis_indices": proj_basis_indices,
+                        "step": step,
+                        "lr": lr,
+                        "downsampled_eval_jacobians": downsampled_eval_jacobians,
+                        "approx_new_probs": approx_new_outputs,
+                        "eval_outputs": eval_outputs,
+                    },
+                    os.path.join(save_path, f"gradients_{step}.pt"),
+                )
 
             if len(all_logits) == 0:
                 # skip batches too small to form a single minibatch
@@ -285,6 +393,15 @@ def train_model(
 
             step += 1
             logger.dumpkvs()
+
+    if store_grads:
+        assert initial_eval_outputs is not None
+        approx_final_preds = sum(per_step_expected_effects) + initial_eval_outputs
+        print(list(zip(initial_eval_outputs, approx_final_preds, eval_outputs)))
+        mad = np.mean(np.abs(approx_final_preds - eval_outputs))
+        print(
+            f"Mean absolute difference between approx final preds and eval probs: {mad:.3f}"
+        )
 
     # save final checkpoint
     if save_every and checkpoint_name(step) not in ckpt_names:
@@ -366,6 +483,7 @@ def train_and_save_model(
     metric_for_best_model: str = "eval/auroc",
     greater_is_better: bool = True,
     save_total_limit: Optional[int] = 1,
+    store_grads: bool = False,
 ) -> tuple:
     if eval_batch_size is None:
         eval_batch_size = batch_size
@@ -460,6 +578,7 @@ def train_and_save_model(
             metric_for_best_model=metric_for_best_model,
             greater_is_better=greater_is_better,
             save_total_limit=save_total_limit,
+            store_grads=store_grads,
         )
         print("Model training took", time.time() - start, "seconds")
 

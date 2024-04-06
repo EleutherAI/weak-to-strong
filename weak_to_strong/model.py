@@ -1,3 +1,4 @@
+import warnings
 from dataclasses import dataclass
 
 import torch
@@ -72,10 +73,10 @@ class TransformerWithHead(PreTrainedModel):
             # remove the LM head so it isn't in model.parameters()
             if hasattr(self.lm, "lm_head"):
                 del self.lm.lm_head
-            if hasattr(self.lm, "embed_out"):
+            elif hasattr(self.lm, "embed_out"):
                 del self.lm.embed_out
             else:
-                print("Tried to remove LM head but it wasn't found.")
+                warnings.warn("Tried to remove LM head but it wasn't found.")
         self.linear_probe = linear_probe
 
     @property
