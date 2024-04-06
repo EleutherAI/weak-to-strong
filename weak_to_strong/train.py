@@ -309,11 +309,12 @@ def train_model(
 
                 approx_new_outputs = tot_expected_effect + eval_outputs
                 minn, first, median, third, maxx = torch.quantile(
-                    approx_new_outputs, torch.tensor([0.0, 0.25, 0.5, 0.75, 1.0])
+                    approx_new_outputs,
+                    torch.tensor([0.0, 0.25, 0.5, 0.75, 1.0], device=io_device),
                 )
                 mean, std = approx_new_outputs.mean(), approx_new_outputs.std()
                 print(
-                    f"Approx new probs: min {minn:.3f}, 1st {first:.3f}, median {median:.3f}, "
+                    f"Approx new outputs: min {minn:.3f}, 1st {first:.3f}, median {median:.3f}, "
                     f"3rd {third:.3f}, max {maxx:.3f}, mean {mean:.3f}, std {std:.3f}"
                 )
                 torch.save(
@@ -323,7 +324,7 @@ def train_model(
                         "step": step,
                         "lr": lr,
                         "downsampled_eval_jacobians": downsampled_eval_jacobians,
-                        "approx_new_probs": approx_new_outputs,
+                        "approx_new_outputs": approx_new_outputs,
                         "eval_outputs": eval_outputs,
                     },
                     os.path.join(save_path, f"gradients_{step}.pt"),
