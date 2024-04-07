@@ -126,6 +126,9 @@ def train_model(
     else:
         lr_scheduler = torch.optim.lr_scheduler.LambdaLR(optimizer, lr_schedule_fn)
 
+    if save_path is not None:
+        ds.save_to_disk(os.path.join(save_path, "train_ds"))
+
     step = 0
     losses = []
     accuracies = []
@@ -173,7 +176,8 @@ def train_model(
     io_device = model.device if hasattr(model, "device") else 0
 
     for epoch in range(epochs):
-        for start in range(0, len(ds), batch_size):  # iterate over batches
+        # iterate over batches, skipping the last one if it's too small
+        for start in range(0, len(ds) - (len(ds) % batch_size), batch_size):
             loss_tot = 0
 
             # compute behaviorally relevant directions in parameter space
@@ -238,8 +242,8 @@ def train_model(
             all_logits = []
             all_labels = []
             if store_grads:
-                downsampled_cumul_grads = torch.empty(
-                    (batch_size, d_down), device=io_device
+                downsampled_cumul_grads = torch.full(
+                    (batch_size, d_down), fill_value=-100.0, device=io_device
                 )
             for j, mbatch in enumerate(
                 to_batch(ds, minibatch_size, start=start, end=start + batch_size)
@@ -277,6 +281,7 @@ def train_model(
 
             # gradients accumulate, so we need to take the difference at the end
             if store_grads:
+                assert (downsampled_cumul_grads == -100.0).float().sum() == 0  # type: ignore
                 assert save_path is not None, "must provide save_path if store_grads"
                 downsampled_grads = downsampled_cumul_grads.diff(
                     dim=0, prepend=downsampled_cumul_grads.new_zeros(1, d_down)
@@ -319,10 +324,11 @@ def train_model(
                 )
                 torch.save(
                     {
+                        "ids": ds["id"][start : start + batch_size],
                         "expected_effects": expected_effects,
                         "proj_basis_indices": proj_basis_indices,
                         "step": step,
-                        "lr": lr,
+                        "lr": optimizer.param_groups[0]["lr"],
                         "downsampled_eval_jacobians": downsampled_eval_jacobians,
                         "approx_new_outputs": approx_new_outputs,
                         "eval_outputs": eval_outputs,
