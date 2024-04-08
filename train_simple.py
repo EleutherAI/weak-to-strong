@@ -261,7 +261,7 @@ def main(
             project="weak-to-strong",
             config=config,
             group=sweep_subfolder,
-            job_type="gt" if weak_labels_path is None else "w2s",
+            job_type="w2s" if is_w2s else "gt",
             name=f"{model_size.split('/')[-1]}_{ds_name}_{loss}",
             dir=results_folder,
         ),
@@ -299,8 +299,8 @@ def main(
     print(f"Training model {model_size}")
     test_results, weak_ds = train_and_save_model(
         model_config,
-        train1_ds,  # this has weak labels iff weak_labels_path is not None
-        test_ds,  # this has ground truth labels no matter what
+        train1_ds,  # this has weak labels iff is_w2s
+        test_ds,  # always has gt labels, and if w2s it tries to report against weak labels too
         inference_ds=train2_ds,  # make weak training dataset for strong model
         batch_size=batch_size,
         save_path=save_path,

@@ -25,7 +25,7 @@ def get_jacobians(
     dataset: Dataset,
     postprocess_logits_fn: LossFnBase = Sigmoid(),
     target_label_column: str = "soft_label",
-    d_proj: int = 10_000,
+    d_down: int = 10_000,
     step_frac: float = 0,
     io_device: str | int = "cuda",
 ):
@@ -49,14 +49,14 @@ def get_jacobians(
 
     generator = torch.Generator().manual_seed(0)
     proj_basis_indices = torch.randint(
-        0, model_n_params, (d_proj,), generator=generator
+        0, model_n_params, (d_down,), generator=generator
     )
     proj_basis_indices, _ = proj_basis_indices.sort()
 
     hash_proj_indices = md5(proj_basis_indices.numpy().tobytes()).hexdigest()
     print(f"Hash(projection indices): {hash_proj_indices}")
 
-    proj_grads = -torch.ones((n_eval, d_proj), device=io_device)
+    proj_grads = -torch.ones((n_eval, d_down), device=io_device)
     fs = -torch.ones((n_eval,), device=io_device)
 
     model.eval()

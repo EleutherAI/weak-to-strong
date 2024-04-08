@@ -69,8 +69,9 @@ def train_model(
     if store_grads:
         minibatch_size = 1
         print(
-            "Setting minibatch size to 1 for weak-to-strong training to compute examplewise grads"
+            "Setting minibatch_size to 1 for weak-to-strong training to compute examplewise grads"
         )
+        assert eval_ds is not None, "must provide eval_ds if store_grads"
 
     print(
         f"LR: {lr}, batch size: {batch_size}, mbatch size: {minibatch_size}, n: {len(ds)}"
@@ -183,6 +184,7 @@ def train_model(
             # compute behaviorally relevant directions in parameter space
             if store_grads:
                 assert eval_ds is not None, "must provide eval_ds if store_grads"
+                d_down = 10_000
                 (
                     downsampled_eval_jacobians,
                     eval_outputs,
@@ -193,13 +195,12 @@ def train_model(
                     dataset=eval_ds,
                     postprocess_logits_fn=grads.Diff(),
                     target_label_column="soft_label",  # is not used
-                    d_proj=10_000,
+                    d_down=d_down,
                     step_frac=step / nsteps,
                     io_device=io_device,
                 )
                 downsampled_eval_jacobians = downsampled_eval_jacobians.to(io_device)
                 proj_basis_indices = proj_basis_indices.to(io_device)
-                d_down = len(proj_basis_indices)
                 if initial_eval_outputs is None:
                     initial_eval_outputs = eval_outputs
                 # note that these jacobians have only 1 (squeezed) column
@@ -267,9 +268,6 @@ def train_model(
                 loss.backward()
 
                 if store_grads:
-                    # dealing with Adam is awkward because the parameter updates are harder
-                    # to decompose into influences of individual examples
-                    assert optimizer_name.lower() == "sgd"
                     assert minibatch_size == 1
 
                     downsampled_cumul_grads[j, :] = grads.gather_grad_components(
@@ -307,7 +305,7 @@ def train_model(
                         * rescale
                     )
                     stderr = terms.std() * np.sqrt(len(terms))
-                    print(f"JVP est {est}: {terms.sum():f} +/- {stderr:f}")
+                    print(f"JVP est {est}: {terms.sum():f} +/- {2 * stderr:f}")
 
                 tot_expected_effect = expected_effects.sum(0)
                 per_step_expected_effects.append(tot_expected_effect)
@@ -404,10 +402,9 @@ def train_model(
     if store_grads:
         assert initial_eval_outputs is not None
         approx_final_preds = sum(per_step_expected_effects) + initial_eval_outputs
-        print(list(zip(initial_eval_outputs, approx_final_preds, eval_outputs)))
-        mad = np.mean(np.abs(approx_final_preds - eval_outputs))
+        mad = (approx_final_preds - eval_outputs).abs().mean().item()
         print(
-            f"Mean absolute difference between approx final preds and eval probs: {mad:.3f}"
+            f"Mean absolute difference between Euler approx final preds and eval probs: {mad:.3f}"
         )
 
     # save final checkpoint
