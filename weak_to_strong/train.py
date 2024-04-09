@@ -40,7 +40,7 @@ def train_model(
     save_every: Optional[int] = None,
     eval_batch_size: int = 256,
     minibatch_size: int = 8,
-    eval_ds: Optional[datasets.Dataset] = None,
+    final_eval_ds: Optional[datasets.Dataset] = None,
     gradient_checkpointing: bool = False,
     train_with_dropout: bool = False,
     epochs: int = 1,
@@ -50,13 +50,15 @@ def train_model(
     # Similar to HF trainer load_best_model_at_end behavior
     # https://huggingface.co/docs/transformers/main_classes/trainer
     load_best_model_at_end: bool = False,
-    # using the "against_supervision" suffix will ensure that the metric is measured
-    # against whatever labeler was used to train the model, whether weak or strong
-    metric_for_best_model: str = "eval/auroc_against_supervision",
+    # because a chunk of the train ds is used for best model scoring,
+    # we always use weak_label-based metrics for selecting the best model
+    metric_for_best_model: str = "eval/auroc",
     greater_is_better: bool = True,
     save_total_limit: Optional[int] = 1,
     store_grads: bool = False,
     n_sems: int = 5,
+    max_val_size: int = 500,
+    val_frac: int = 5,
 ):
     """
     ds is a dataset of examples, each of which is a dict with keys:
@@ -71,11 +73,8 @@ def train_model(
         print(
             "Setting minibatch_size to 1 for weak-to-strong training to compute examplewise grads"
         )
-        assert eval_ds is not None, "must provide eval_ds if store_grads"
+        assert final_eval_ds is not None, "must provide eval_ds if store_grads"
 
-    print(
-        f"LR: {lr}, batch size: {batch_size}, mbatch size: {minibatch_size}, n: {len(ds)}"
-    )
     assert (
         batch_size % minibatch_size == 0
     ), "batch size must be divisible by minibatch size"
@@ -86,11 +85,23 @@ def train_model(
         ), "save_path must not be None if save_every is not None"
         return os.path.join(save_path, f"checkpoint_{step}.bin")
 
-    if metric_for_best_model.endswith("_against_supervision"):
-        metric_for_best_model = metric_for_best_model.replace(
-            "_against_supervision", "_against_weak" if is_w2s else ""
+    if load_best_model_at_end:
+        # split off a fraction of the train ds for evaluation
+        # when we're selecting using it
+        n_eval = min(max_val_size, len(ds) // val_frac)
+        print(
+            f"Taking {n_eval} examples from the training set for selecting best model"
         )
+        ddict = datasets.Dataset.train_test_split(ds, test_size=n_eval)
+        ds, val_ds = ddict["train"], ddict["test"]
+    else:
+        val_ds = final_eval_ds
 
+    print(
+        f"LR: {lr}, batch size: {batch_size}, mbatch size: {minibatch_size}, n: {len(ds)}"
+    )
+
+    ### Prepare model, optimizer, and scheduler ###
     # we purposefully turn off dropout, for determinism
     # this seems to help for 1 epoch finetuning anyways
     model.train(mode=train_with_dropout)
@@ -183,7 +194,9 @@ def train_model(
 
             # compute behaviorally relevant directions in parameter space
             if store_grads:
-                assert eval_ds is not None, "must provide eval_ds if store_grads"
+                assert (
+                    final_eval_ds is not None
+                ), "must provide final_eval_ds if store_grads"
                 d_down = 10_000
                 (
                     downsampled_eval_jacobians,
@@ -192,7 +205,7 @@ def train_model(
                     model_n_params,
                 ) = grads.get_jacobians(
                     model=model,
-                    dataset=eval_ds,
+                    dataset=final_eval_ds,
                     postprocess_logits_fn=grads.Diff(),
                     target_label_column="soft_label",  # is not used
                     d_down=d_down,
@@ -214,12 +227,10 @@ def train_model(
 
             # eval
             if eval_every and step % eval_every == 0 and eval_every < nsteps:
-                assert (
-                    eval_ds is not None
-                ), "must provide eval_ds if eval_every is not None"
+                assert val_ds is not None
                 eval_results, eval_metrics = eval_loop(
                     model,
-                    eval_ds,
+                    val_ds,
                     eval_batch_size,
                     metric_prefix="eval",
                     remove_large_columns=True,
@@ -420,10 +431,12 @@ def train_model(
     final_eval_results = None
     if eval_every:
         print("Final evaluation:")
-        assert eval_ds is not None, "must provide eval_ds if eval_every is not None"
+        assert (
+            final_eval_ds is not None
+        ), "must provide eval_ds if eval_every is not None"
         final_eval_results, final_eval_metrics = eval_loop(
             model,
-            eval_ds,
+            final_eval_ds,
             eval_batch_size,
             metric_prefix="eval",
             remove_large_columns=False,
@@ -438,12 +451,12 @@ def train_model(
         update_best()
 
     # load and and save best model
-    if load_best_model_at_end and best_step != step:
+    if load_best_model_at_end and best_step and best_step != step:
         print(f"Loading best model from step {best_step}")
         assert best_step is not None
-        assert maybe_load_model(model, checkpoint_name(best_step)), (
-            "Failed to load " "the best model."
-        )
+        assert maybe_load_model(
+            model, checkpoint_name(best_step)
+        ), f"Failed to load the best model from step {best_step}"
     if save_every:
         assert (
             save_path is not None
@@ -571,7 +584,7 @@ def train_and_save_model(
             lr=lr,
             epochs=epochs,
             save_path=save_path,
-            eval_ds=test_ds,
+            final_eval_ds=test_ds,
             gradient_checkpointing=gradient_checkpointing,
             loss_fn=loss_fn,
             eval_batch_size=eval_batch_size,

@@ -73,9 +73,9 @@ def main(
     # Similar to HF trainer load_best_model_at_end behavior
     # https://huggingface.co/docs/transformers/main_classes/trainer
     load_best_model_at_end: bool = False,
-    # using the "against_supervision" suffix will ensure that the metric is measured
-    # against whatever labeler was used to train the model, whether weak or strong
-    metric_for_best_model: str = "eval/auroc_against_supervision",
+    # because a chunk of the train ds is used for best model scoring,
+    # we always use weak_label-based metrics for selecting the best model
+    metric_for_best_model: str = "eval/auroc",
     greater_is_better: bool = True,
     save_total_limit: Optional[int] = 1,
     disable_lora: bool = False,
