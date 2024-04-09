@@ -94,15 +94,22 @@ def get_jacobians(
     return proj_grads, fs, proj_basis_indices, model_n_params
 
 
-def gather_grad_components(model, proj_basis_indices, io_device: str | int = "cuda"):
+def gather_grad_components(
+    model, proj_basis_indices, io_device: str | int = "cuda", optimizer=None
+):
     """
     This avoids concatenating all the grads
     into one tensor before projecting, to save memory.
     This assumes `model` parameters has gradients already computed.
+
+    If optimizer passed is Adam, then we also normalize the gradients by the
+    second moment estimate per Adam's update rule.
     """
-    proj_grads = torch.zeros((len(proj_basis_indices),), device=io_device)
-    grad_iter = iter(p.grad for p in model.parameters() if p.grad is not None)
-    pg = next(grad_iter)
+    proj_updates = torch.zeros((len(proj_basis_indices),), device=io_device)
+    param_iter = iter(p for p in model.parameters() if p.grad is not None)
+    param = next(param_iter)
+    pg = param.grad
+
     start_i = 0  # index into grad of the first component of pg
     for proj_i, grad_idxr in enumerate(
         proj_basis_indices
@@ -111,6 +118,22 @@ def gather_grad_components(model, proj_basis_indices, io_device: str | int = "cu
             start_i + pg.numel() <= grad_idxr
         ):  # while the current param is earlier than the desired index
             start_i += pg.numel()
-            pg = next(grad_iter)
-        proj_grads[proj_i] = pg.flatten()[grad_idxr - start_i]
-    return proj_grads
+            param = next(param_iter)
+            pg = param.grad
+
+        update = pg.flatten()[grad_idxr - start_i]
+        if isinstance(optimizer, torch.optim.Adam):
+            step = optimizer.state[param].get("step", 0)
+            if step > 0:
+                # normalize based on raw second moment estimates
+                beta2 = optimizer.param_groups[0]["betas"][1]
+                exp_avg_sq = optimizer.state[param]["exp_avg_sq"]
+                exp_avg_sq = exp_avg_sq.flatten()[grad_idxr - start_i].to(io_device)
+                corrected_exp_avg_sq = exp_avg_sq / (1 - beta2**step)
+                update /= (
+                    torch.sqrt(corrected_exp_avg_sq) + optimizer.param_groups[0]["eps"]
+                )
+
+        proj_updates[proj_i] = update
+
+    return proj_updates

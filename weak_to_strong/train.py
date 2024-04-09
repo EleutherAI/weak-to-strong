@@ -165,7 +165,7 @@ def train_model(
                     "No checkpoint found "
                     "for the current step, "
                     "but load_best_model_at_end was set to True and the current step is "
-                    "best. Please set save_every to a multiple of eval_every."
+                    "best. Please set eval_every to a multiple of save_every."
                 )
                 best_eval = current_eval
                 best_step = step
@@ -271,7 +271,10 @@ def train_model(
                     assert minibatch_size == 1
 
                     downsampled_cumul_grads[j, :] = grads.gather_grad_components(
-                        model, proj_basis_indices, io_device=io_device
+                        model,
+                        proj_basis_indices,
+                        io_device=io_device,
+                        optimizer=optimizer,
                     )
 
                 all_logits.extend(logits)
