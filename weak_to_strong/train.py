@@ -299,7 +299,7 @@ def train_model(
                     dim=0, prepend=downsampled_cumul_grads.new_zeros(1, d_down)
                 )
 
-                # compute expected effect on eval avg(|p_hat - soft_label|)
+                # compute expected effect on eval outputs
                 updates = -optimizer.param_groups[0]["lr"] * downsampled_grads
                 jvps = updates @ downsampled_eval_jacobians.mT  # [batch_size, n_eval]
 

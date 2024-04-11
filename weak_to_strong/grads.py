@@ -121,19 +121,21 @@ def gather_grad_components(
             param = next(param_iter)
             pg = param.grad
 
-        update = pg.flatten()[grad_idxr - start_i]
+        update = pg.flatten()[grad_idxr - start_i].to(io_device)
         if isinstance(optimizer, torch.optim.Adam):
             step = optimizer.state[param].get("step", 0)
             if step > 0:
                 # normalize based on raw second moment estimates
-                beta2 = optimizer.param_groups[0]["betas"][1]
+                beta2 = float(optimizer.param_groups[0]["betas"][1])
                 exp_avg_sq = optimizer.state[param]["exp_avg_sq"]
+                eps = float(optimizer.param_groups[0]["eps"])
                 exp_avg_sq = exp_avg_sq.flatten()[grad_idxr - start_i].to(io_device)
-                corrected_exp_avg_sq = exp_avg_sq / (1 - beta2**step)
-                update /= torch.sqrt(corrected_exp_avg_sq) + optimizer.param_groups[0][
-                    "eps"
-                ].to(io_device)
+                corrected_exp_avg = torch.sqrt(exp_avg_sq / (1 - beta2**step))
+            else:
+                corrected_exp_avg = update.abs()
+
+            update = update / (corrected_exp_avg + eps)
 
         proj_updates[proj_i] = update
 
-    return proj_updates.to(io_device)
+    return proj_updates
