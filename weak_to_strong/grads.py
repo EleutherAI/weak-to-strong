@@ -130,10 +130,10 @@ def gather_grad_components(
                 exp_avg_sq = optimizer.state[param]["exp_avg_sq"]
                 exp_avg_sq = exp_avg_sq.flatten()[grad_idxr - start_i].to(io_device)
                 corrected_exp_avg_sq = exp_avg_sq / (1 - beta2**step)
-                update /= (
-                    torch.sqrt(corrected_exp_avg_sq) + optimizer.param_groups[0]["eps"]
-                )
+                update /= torch.sqrt(corrected_exp_avg_sq) + optimizer.param_groups[0][
+                    "eps"
+                ].to(io_device)
 
         proj_updates[proj_i] = update
 
-    return proj_updates
+    return proj_updates.to(io_device)

@@ -32,7 +32,7 @@ class xent_loss(LossFnBase):
         """
         loss = torch.nn.functional.cross_entropy(logits, labels)
         return loss.mean()
-    
+
 
 # Custom loss function
 class kl_loss(LossFnBase):
@@ -53,7 +53,9 @@ class kl_loss(LossFnBase):
         The mean of the KL divergence loss.
         """
         logprobs = torch.log_softmax(logits, dim=-1)  # [batch, 2]
-        loss = torch.nn.functional.kl_div(logprobs, labels, log_target=False, reduction="batchmean")
+        loss = torch.nn.functional.kl_div(
+            logprobs, labels, log_target=False, reduction="batchmean"
+        )
         return loss.mean()
 
 
@@ -116,7 +118,7 @@ class logconf_loss_fn(LossFnBase):
     ) -> torch.Tensor:
         logits = logits.float()
         labels = labels.float()
-        coef = 1.0 if step_frac > self.warmup_frac else step_frac
+        coef = 1.0 if step_frac >= self.warmup_frac else step_frac / self.warmup_frac
         coef = coef * self.aux_coef
         preds = torch.softmax(logits, dim=-1)
         mean_weak = torch.mean(labels, dim=0)
