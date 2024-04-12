@@ -1,9 +1,11 @@
 import os
 import pickle
 import time
+import copy
 from typing import Callable, Optional
 
 import datasets
+from tqdm.auto import tqdm
 import numpy as np
 import torch
 import torch_optimizer as toptim
@@ -17,6 +19,7 @@ from weak_to_strong.model import TransformerWithHead
 from weak_to_strong.config import ModelConfig
 from weak_to_strong import grads
 
+import pdb
 
 def save(
     model: torch.nn.Module,
@@ -187,6 +190,8 @@ def train_model(
     # a bit more data than other ones, but hopefully should not be too big of a deal.
     io_device = model.device if hasattr(model, "device") else 0
 
+    torch.autograd.set_detect_anomaly(True)
+
     for epoch in range(epochs):
         # iterate over batches, skipping the last one if it's too small
         for start in range(0, len(ds) - (len(ds) % batch_size), batch_size):
@@ -194,6 +199,36 @@ def train_model(
 
             # compute behaviorally relevant directions in parameter space
             if store_grads:
+
+                exact_new_outputs = torch.zeros((batch_size, len(final_eval_ds)), device=io_device)
+
+                for j, mbatch in enumerate(
+                    to_batch(ds, minibatch_size, start=start, end=start + batch_size)
+                ):
+                    input_ids = (
+                        torch.nn.utils.rnn.pad_sequence(
+                            [torch.tensor(ids) for ids in mbatch["input_ids"]]  # type: ignore
+                        )
+                        .transpose(0, 1)
+                        .to(io_device)  # type: ignore
+                    )
+                    labels = torch.tensor(mbatch["soft_label"]).to(io_device)
+                    exact_new_outputs[j, :] = get_counterfactual_result(
+                        mbatch,
+                        input_ids,
+                        labels,
+                        model,
+                        optimizer,
+                        lr_scheduler,
+                        final_eval_ds,
+                        loss_fn,
+                        step,
+                        nsteps,
+                        minibatch_size,
+                        batch_size,
+                        io_device
+                    )
+
                 assert (
                     final_eval_ds is not None
                 ), "must provide final_eval_ds if store_grads"
@@ -257,6 +292,7 @@ def train_model(
                 downsampled_cumul_grads = torch.full(
                     (batch_size, d_down), fill_value=-100.0, device=io_device
                 )
+
             for j, mbatch in enumerate(
                 to_batch(ds, minibatch_size, start=start, end=start + batch_size)
             ):
@@ -330,9 +366,18 @@ def train_model(
                     torch.tensor([0.0, 0.25, 0.5, 0.75, 1.0], device=io_device),
                 )
                 mean, std = approx_new_outputs.mean(), approx_new_outputs.std()
+
+                delta = (exact_new_outputs - eval_outputs.unsqueeze(0) - expected_effects).abs()
+                d_minn, d_first, d_median, d_third, d_maxx = torch.quantile(
+                    delta,
+                    torch.tensor([0.0, 0.25, 0.5, 0.75, 1.0], device=io_device),
+                )
+                d_mean, d_std = delta.mean(), delta.std()
                 print(
                     f"Approx new outputs: min {minn:.3f}, 1st {first:.3f}, median {median:.3f}, "
-                    f"3rd {third:.3f}, max {maxx:.3f}, mean {mean:.3f}, std {std:.3f}"
+                    f"3rd {third:.3f}, max {maxx:.3f}, mean {mean:.3f}, std {std:.3f}\n"
+                    f"Approx exact delta: min {d_minn:.3e}, 1st {d_first:.3e}, median {d_median:.3e}, "
+                    f"3rd {d_third:.3e}, max {d_maxx:.3e}, mean {d_mean:.3e}, std {d_std:.3e}"
                 )
                 torch.save(
                     {
@@ -344,6 +389,7 @@ def train_model(
                         "downsampled_eval_jacobians": downsampled_eval_jacobians,
                         "approx_new_outputs": approx_new_outputs,
                         "eval_outputs": eval_outputs,
+                        "exact_new_outputs": exact_new_outputs
                     },
                     os.path.join(save_path, f"gradients_{step}.pt"),
                 )
@@ -467,6 +513,72 @@ def train_model(
 
     print("done.")
     return final_eval_results, final_eval_metrics
+
+
+def get_counterfactual_result(
+        mbatch,
+        input_ids,
+        labels,
+        model: torch.nn.Module,
+        optimizer: torch.optim.Optimizer,
+        lr_scheduler: torch.optim.lr_scheduler.LRScheduler,
+        eval_dataset: datasets.Dataset,
+        loss_fn: Callable,
+        step: int,
+        nsteps: int,
+        train_minibatch_size: int,
+        train_batch_size: int,
+        io_device: str,
+        eval_batch_size: int = 4,
+        step_frac: float = 0,
+        target_label_column: str = "soft_label",
+        postprocess_logits_fn: Callable = grads.MultiDiff()
+):
+    counterfactual_model = copy.deepcopy(model)
+    cf_trainable_params = [p for p in counterfactual_model.parameters() if p.requires_grad]
+
+    opt_hypers = optimizer.defaults
+    counterfactual_optimizer = type(optimizer)(cf_trainable_params, **opt_hypers)
+    counterfactual_optimizer.load_state_dict(copy.deepcopy(optimizer.state_dict()))
+    counterfactual_scheduler = type(lr_scheduler)(counterfactual_optimizer, nsteps)
+    counterfactual_scheduler.load_state_dict(copy.deepcopy(lr_scheduler.state_dict()))
+
+    counterfactual_logits = counterfactual_model(
+        input_ids=input_ids, choice_input_ids=mbatch.get("choice_input_ids")
+    ).to(io_device)
+    counterfactual_loss = loss_fn(counterfactual_logits, 
+                                    labels, step_frac=step / nsteps) * (
+        train_minibatch_size / train_batch_size
+    )
+    counterfactual_loss.backward()
+    counterfactual_optimizer.step()
+    counterfactual_optimizer.zero_grad()
+
+    n_eval = len(eval_dataset)
+
+    counterfactual_output = torch.zeros(n_eval).to(io_device)
+
+    for i, batch in tqdm(
+        enumerate(to_batch(eval_dataset.select(range(n_eval)), batch_size=eval_batch_size)),
+        desc="Computing model on eval datapoints",
+        total=n_eval,
+    ):
+        label = torch.tensor(batch[target_label_column]).to(io_device)
+        input_ids = (
+            torch.nn.utils.rnn.pad_sequence(
+                [torch.tensor(ids) for ids in batch["input_ids"]]  # type: ignore
+            )
+            .transpose(0, 1)
+            .to(io_device)  # type: ignore
+        )
+        logits = counterfactual_model(
+            input_ids=input_ids, choice_input_ids=batch.get("choice_input_ids")
+        ).to(io_device).detach()
+
+        processed_logits = postprocess_logits_fn(logits, label, step_frac=step_frac)
+        counterfactual_output[i*eval_batch_size: (i+1)*eval_batch_size] = processed_logits
+
+    return counterfactual_output.cpu()
 
 
 def maybe_load_model(model, checkpoint_path, disable=False):

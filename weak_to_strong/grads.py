@@ -19,6 +19,9 @@ class Diff(LossFnBase):
         assert logits.shape == torch.Size([1, 2])
         return logits[0, 1] - logits[0, 0]
 
+class MultiDiff(LossFnBase):
+    def __call__(self, logits, labels, step_frac=0):
+        return logits[:, 1] - logits[:, 0]
 
 def get_jacobians(
     model: torch.nn.Module,
@@ -128,12 +131,12 @@ def gather_grad_components(
                 # normalize based on raw second moment estimates
                 beta2 = float(optimizer.param_groups[0]["betas"][1])
                 exp_avg_sq = optimizer.state[param]["exp_avg_sq"]
-                eps = float(optimizer.param_groups[0]["eps"])
                 exp_avg_sq = exp_avg_sq.flatten()[grad_idxr - start_i].to(io_device)
                 corrected_exp_avg = torch.sqrt(exp_avg_sq / (1 - beta2**step))
             else:
                 corrected_exp_avg = update.abs()
-
+            
+            eps = float(optimizer.param_groups[0]["eps"])
             update = update / (corrected_exp_avg + eps)
 
         proj_updates[proj_i] = update
