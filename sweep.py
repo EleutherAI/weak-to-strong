@@ -5,7 +5,7 @@ import traceback
 import fire
 
 
-def split_model_sizes(model_sizes: Union[List[str], str]) -> List[str]:
+def split_possible_string_list(model_sizes: Union[List[str], str]) -> List[str]:
     if isinstance(model_sizes, str):
         return model_sizes.split(",")
     return model_sizes
@@ -44,15 +44,15 @@ def main(
     )
     if model_sizes is None:
         assert weak_model_sizes is not None and strong_model_sizes is not None
-        weak_model_sizes = split_model_sizes(weak_model_sizes)
-        strong_model_sizes = split_model_sizes(strong_model_sizes)
+        weak_model_sizes = split_possible_string_list(weak_model_sizes)
+        strong_model_sizes = split_possible_string_list(strong_model_sizes)
         all_model_sizes = weak_model_sizes + strong_model_sizes
         weak_to_strong_model_sizes = [
             (weak, strong) for weak in weak_model_sizes for strong in strong_model_sizes
         ]
     else:
         assert weak_model_sizes is None and strong_model_sizes is None
-        all_model_sizes = model_sizes = split_model_sizes(model_sizes)
+        all_model_sizes = model_sizes = split_possible_string_list(model_sizes)
         weak_to_strong_model_sizes = [
             (model_sizes[i], model_sizes[j])
             for i in range(len(model_sizes))

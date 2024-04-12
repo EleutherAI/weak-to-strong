@@ -49,16 +49,13 @@ def train_model(
     optimizer_name: str = "adam",
     # Similar to HF trainer load_best_model_at_end behavior
     # https://huggingface.co/docs/transformers/main_classes/trainer
+    # always uses AUROC against supervision to select best model
     load_best_model_at_end: bool = False,
-    # because a chunk of the train ds is used for best model scoring,
-    # we always use weak_label-based metrics for selecting the best model
-    metric_for_best_model: str = "eval/auroc",
-    greater_is_better: bool = True,
     save_total_limit: Optional[int] = 1,
     store_grads: bool = False,
     n_sems: int = 5,
     max_val_size: int = 500,
-    val_frac: int = 5,
+    val_frac: float = 0.2,
 ):
     """
     ds is a dataset of examples, each of which is a dict with keys:
@@ -68,11 +65,11 @@ def train_model(
         indicating to use the LM head of the model
     """
     is_w2s = "gt_soft_label" in ds.features
+    if load_best_model_at_end:
+        metric_for_best_model = "eval/auroc_against_weak" if is_w2s else "eval/auroc"
     if store_grads:
         minibatch_size = 1
-        print(
-            "Setting minibatch_size to 1 for weak-to-strong training to compute examplewise grads"
-        )
+        print("Setting minibatch_size to 1 for w2s training to with store_grads=True")
         assert final_eval_ds is not None, "must provide eval_ds if store_grads"
 
     assert (
@@ -88,18 +85,23 @@ def train_model(
     if load_best_model_at_end:
         # split off a fraction of the train ds for evaluation
         # when we're selecting using it
-        n_eval = min(max_val_size, len(ds) // val_frac)
-        print(
-            f"Taking {n_eval} examples from the training set for selecting best model"
-        )
+        n_eval = min(max_val_size, int(len(ds) * val_frac))
+        print(f"Taking {n_eval} examples from train set for selecting best model")
         ddict = datasets.Dataset.train_test_split(ds, test_size=n_eval)
         ds, val_ds = ddict["train"], ddict["test"]
+        if is_w2s:
+            val_ds = val_ds.rename_columns(
+                {
+                    "soft_label": "weak_soft_label",
+                    "hard_label": "weak_hard_label",
+                    "gt_soft_label": "soft_label",
+                    "gt_hard_label": "hard_label",
+                }
+            )
     else:
         val_ds = final_eval_ds
 
-    print(
-        f"LR: {lr}, batch size: {batch_size}, mbatch size: {minibatch_size}, n: {len(ds)}"
-    )
+    print(f"LR: {lr}, BS: {batch_size}, MBS: {minibatch_size}, n: {len(ds)}")
 
     ### Prepare model, optimizer, and scheduler ###
     # we purposefully turn off dropout, for determinism
@@ -145,7 +147,7 @@ def train_model(
     losses = []
     accuracies = []
     aurocs = []
-    best_eval = float("-inf") if greater_is_better else float("inf")
+    best_eval = float("-inf")
     best_step = 0 if load_best_model_at_end else None
     ckpt_names = []
     per_step_expected_effects = []
@@ -169,9 +171,7 @@ def train_model(
         nonlocal best_eval, best_step
         if load_best_model_at_end:
             current_eval = eval_metrics[metric_for_best_model]
-            if (greater_is_better and current_eval > best_eval) or (
-                not greater_is_better and current_eval < best_eval
-            ):
+            if current_eval > best_eval:
                 assert os.path.exists(checkpoint_name(step)), (
                     "No checkpoint found "
                     "for the current step, "
@@ -500,7 +500,6 @@ def train_and_save_model(
     eval_every: Optional[int] = None,
     save_every: Optional[int] = None,
     load_best_model_at_end: bool = False,
-    metric_for_best_model: str = "eval/auroc",
     greater_is_better: bool = True,
     save_total_limit: Optional[int] = 1,
     store_grads: bool = False,
@@ -529,7 +528,6 @@ def train_and_save_model(
             model_config.name,
             lora_modules=model_config.lora_modules,
             use_lm_head=use_lm_head,
-            num_labels=2,
             device_map="auto",
             linear_probe=linear_probe,
             **model_config.custom_kwargs,
@@ -541,7 +539,6 @@ def train_and_save_model(
             model_config.name,
             lora_modules=model_config.lora_modules,
             use_lm_head=use_lm_head,
-            num_labels=2,
             linear_probe=linear_probe,
             **model_config.custom_kwargs,
         ).to(
@@ -595,8 +592,6 @@ def train_and_save_model(
             optimizer_name=optimizer_name,
             save_every=save_every,
             load_best_model_at_end=load_best_model_at_end,
-            metric_for_best_model=metric_for_best_model,
-            greater_is_better=greater_is_better,
             save_total_limit=save_total_limit,
             store_grads=store_grads,
         )

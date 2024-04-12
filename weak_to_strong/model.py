@@ -3,7 +3,13 @@ from dataclasses import dataclass
 
 import torch
 from transformers import AutoConfig, AutoModelForCausalLM, PreTrainedModel
-from peft import get_peft_model, LoraConfig, TaskType, PeftType  # type: ignore
+from peft import (
+    get_peft_model,
+    LoraConfig,
+    TaskType,
+    PeftType,
+    AutoPeftModelForCausalLM,  # type: ignore
+)
 from peft.tuners.lora.layer import LoraLayer
 from typing import Optional
 
@@ -29,12 +35,22 @@ class TransformerWithHead(PreTrainedModel):
         lora_dropout=0.0,
         **kwargs,
     ):
-        config = AutoConfig.from_pretrained(name, **kwargs)
+        try:
+            config = AutoConfig.from_pretrained(name, **kwargs)
+            lm = AutoModelForCausalLM.from_pretrained(name, **kwargs)
+        except OSError:
+            print(
+                f"Could not find config for {name} on the hub. Assuming this is PEFT model"
+            )
+            lm = AutoPeftModelForCausalLM.from_pretrained(name, **kwargs)
+            lm = lm.merge_and_unload()
+        config = lm.config
         super().__init__(config)
+        self.lm = lm
+        self.name = name
         self.num_labels = config.num_labels
         self.use_lm_head = use_lm_head
         self.lora_modules = lora_modules
-        self.lm = AutoModelForCausalLM.from_pretrained(name, **kwargs)
 
         if lora_modules is not None:
             print(f"Using LoraModel on modules {lora_modules}")

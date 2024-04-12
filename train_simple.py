@@ -72,14 +72,14 @@ def main(
     skip_if_exists: bool = False,
     # Similar to HF trainer load_best_model_at_end behavior
     # https://huggingface.co/docs/transformers/main_classes/trainer
+    # always uses AUROC against supervision
     load_best_model_at_end: bool = False,
-    # because a chunk of the train ds is used for best model scoring,
-    # we always use weak_label-based metrics for selecting the best model
-    metric_for_best_model: str = "eval/auroc",
-    greater_is_better: bool = True,
     save_total_limit: Optional[int] = 1,
     disable_lora: bool = False,
     store_grads: bool = False,
+    # Using model_cfg_name allows you to use the model config specified by
+    # model_cfg_name but request a different model from the hub
+    model_cfg_name: Optional[str] = None,
 ):
     # try to clean up memory
     clear_mem()
@@ -99,9 +99,12 @@ def main(
     batch_size = w2s_batch_size if is_w2s else gt_batch_size
     store_grads = store_grads and is_w2s
 
-    mcfg = MODELS_DICT[model_size].copy()
+    print(f"model_size: {model_size}, model_cfg_name: {model_cfg_name}")
+    mcfg = MODELS_DICT[model_cfg_name or model_size].copy()
     if disable_lora:
         del mcfg["lora_modules"]
+    if model_cfg_name is not None:
+        mcfg["name"] = model_size
     model_config = ModelConfig(**mcfg)
     if model_config.model_parallel:
         print(f"Using model parallelism for {model_size}")
@@ -153,8 +156,6 @@ def main(
         # "sweep_subfolder": sweep_subfolder,
         "eval_every": eval_every,
         "load_best_model_at_end": load_best_model_at_end,
-        "metric_for_best_model": metric_for_best_model,
-        "greater_is_better": greater_is_better,
         "save_total_limit": save_total_limit,
         "disable_lora": disable_lora,
         "store_grads": store_grads,
@@ -201,10 +202,16 @@ def main(
 
     if weak_labels_path is None:  # train on ground truth
         # split off half for getting weak labels
-        split_data = train_dataset.train_test_split(test_size=n_train2_docs, seed=seed)
-        train1_ds, train2_ds = split_data["train"], split_data["test"]
+        if n_train2_docs:
+            split_data = train_dataset.train_test_split(
+                test_size=n_train2_docs, seed=seed
+            )
+            train1_ds, train2_ds = split_data["train"], split_data["test"]
+        else:
+            train1_ds, train2_ds = train_dataset, None
         if skip_inference:
             train2_ds = None
+        if train2_ds is None:
             print("len(train1):", len(train1_ds), "(skipping inference)")
         else:
             print("len(train1):", len(train1_ds), "len(train2):", len(train2_ds))
@@ -262,7 +269,7 @@ def main(
             config=config,
             group=sweep_subfolder,
             job_type="w2s" if is_w2s else "gt",
-            name=f"{model_size.split('/')[-1]}_{ds_name}_{loss}",
+            name=f"{model_config.name.split('/')[-1]}_{ds_name}_{loss}",
             dir=results_folder,
         ),
     )
@@ -317,8 +324,6 @@ def main(
         eval_every=eval_every,
         save_every=save_every,
         load_best_model_at_end=load_best_model_at_end,
-        metric_for_best_model=metric_for_best_model,
-        greater_is_better=greater_is_better,
         save_total_limit=save_total_limit,
         store_grads=store_grads,
     )

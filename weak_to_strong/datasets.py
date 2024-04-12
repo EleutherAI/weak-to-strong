@@ -22,6 +22,7 @@ class DatasetConfig:
     # formats items to have keys 'txt' and 'hard_label', takes a random.Random rng
     # optionally also adds the key 'choices', a pair of strings, indicating to use the lm head
     formatter: Callable[[Any], Any]
+    balance: bool = True
 
 
 # mapping from dataset name to load function and format function
@@ -52,7 +53,9 @@ def balance(ds: HfDataset, seed: int):
 
 
 def load_and_process_dataset(
-    ds_name: str, seed: int = 0, split_sizes: Optional[dict] = None
+    ds_name: str,
+    seed: int = 0,
+    split_sizes: Optional[dict] = None,
 ):
     if split_sizes is None:
         split_sizes = dict(train=None, test=None)
@@ -63,14 +66,16 @@ def load_and_process_dataset(
     results = {}
     for split, n_docs in split_sizes.items():
         ds = cfg.loader(split)
+        ds = ds.map(functools.partial(cfg.formatter, rng=Random(seed)))  # type: ignore
+        if cfg.balance:
+            ds = balance(ds, seed)
         try:
             ds = ds.select(range(n_docs))
         except IndexError:
-            print(f"Warning {ds_name} has less than {n_docs} docs, using all {len(ds)}")
-        ds = balance(
-            ds.map(functools.partial(cfg.formatter, rng=Random(seed))),  # type: ignore
-            seed,
-        )
+            print(
+                f"Warning {ds_name} has < {n_docs} docs after balancing, using all {len(ds)}"
+            )
+
         ds = ds.map(
             lambda ex: {
                 "id": hashlib.sha1(ex["txt"].encode()).hexdigest()[:8],
@@ -151,19 +156,27 @@ def hf_loader(*hf_name, split_names=None, n_test=None):
     If `n_test` is provided, it will concatenate all splits together
     and then take a deterministic test set of size `n_test` from it.
     """
-    if n_test is not None:
-        assert split_names is None
-        ds = hf_load_dataset(*hf_name)
-        if isinstance(ds, HfDatasetDict):
-            ds = concatenate_datasets(ds.values())  # type: ignore
-        assert isinstance(ds, HfDataset)
-        splits = ds.train_test_split(test_size=n_test, seed=0)
-        return lambda split: splits[split]
 
-    if split_names is None:
-        split_names = dict()
+    # this thunk avoids loading datasets at import time
+    def thunk(split):
+        nonlocal split_names
+        if n_test is not None:
+            assert split_names is None
+            ds = hf_load_dataset(*hf_name)
+            if isinstance(ds, HfDatasetDict):
+                ds = concatenate_datasets(ds.values())  # type: ignore
+            assert isinstance(ds, HfDataset)
+            # the seed is fixed so that all runs use the same test pool
+            splits = ds.train_test_split(test_size=n_test, seed=0)
 
-    return lambda split: hf_load_dataset(*hf_name, split=split_names.get(split, split))
+            return splits[split]
+
+        if split_names is None:
+            split_names = dict()
+
+        return hf_load_dataset(*hf_name, split=split_names.get(split, split))
+
+    return thunk
 
 
 def sciq_with_support_loader(*hf_name, split_names=None, n_test=None):
@@ -380,6 +393,50 @@ register_dataset(
         formatter=format_boolq,  # type: ignore
     ),
 )
+
+
+# Quirky datasets
+
+quirky_templates = {
+    "capitals": "{admin_name}, {country}\n\n{city}",
+    "hemisphere": "{city}",
+    "population": "{city}",
+    "sciq": "{support}\n\n{question} {answer}",
+    # "sciq": "Name: Alice\n\nPassage 1:\n{support}\n\nQ1: "
+    #     '"{question}" Is the answer "{answer}"?\nA:',
+    "sentiment": "{title}\n{review}",
+    # "sentiment": "Name: Alice\n\nTitle: {title}\n{review}\n\nQ: Does the above "
+    #     "review have a positive or negative sentiment?\nA:",
+    "nli": "{premise}\n\n{hypothesis}",
+    "authors": "{title}\n{author}",
+    "addition": "{op1} | {op2} | {result}",
+    "subtraction": "{op1} | {op2} | {result}",
+    "multiplication": "{op1} | {op2} | {result}",
+    "modularaddition": "{op1} | {op2} | {result}",
+    "squaring": "{op1} | {result}",
+}
+
+
+def format_quirky(ex, rng, ds_name, label_col="alice_label"):
+    return dict(
+        txt=quirky_templates[ds_name].format(**ex["template_args"]),
+        hard_label=ex[label_col],
+    )
+
+
+for ds_name in quirky_templates:
+    for label_col in ["alice_label", "bob_label"]:
+        register_dataset(
+            f"quirky_{ds_name}" + ("_weak" if label_col == "bob_label" else ""),
+            DatasetConfig(
+                # NOTE: this is using the same examples as the quirky models were finetuned on
+                loader=hf_loader(f"EleutherAI/quirky_{ds_name}_raw"),  # type: ignore
+                formatter=functools.partial(
+                    format_quirky, ds_name=ds_name, label_col=label_col
+                ),  # type: ignore
+                balance=False,
+            ),
+        )
 
 
 VALID_DATASETS: list[str] = list(_REGISTRY.keys())
