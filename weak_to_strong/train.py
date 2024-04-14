@@ -7,6 +7,7 @@ import datasets
 import numpy as np
 import torch
 import torch_optimizer as toptim
+from tqdm import tqdm
 from transformers import get_linear_schedule_with_warmup
 
 import weak_to_strong.logger as logger
@@ -53,7 +54,7 @@ def train_model(
     load_best_model_at_end: bool = False,
     save_total_limit: Optional[int] = 1,
     store_grads: bool = False,
-    n_sems: int = 5,
+    n_sems: int = 3,
     max_val_size: int = 500,
     val_frac: float = 0.2,
 ):
@@ -257,8 +258,12 @@ def train_model(
                 downsampled_cumul_grads = torch.full(
                     (batch_size, d_down), fill_value=-100.0, device=io_device
                 )
-            for j, mbatch in enumerate(
-                to_batch(ds, minibatch_size, start=start, end=start + batch_size)
+            for j, mbatch in tqdm(
+                enumerate(
+                    to_batch(ds, minibatch_size, start=start, end=start + batch_size)
+                ),
+                disable=not store_grads,
+                total=batch_size // minibatch_size,
             ):
                 input_ids = (
                     torch.nn.utils.rnn.pad_sequence(
@@ -318,22 +323,15 @@ def train_model(
                         * downsampled_eval_jacobians[eval_idx]
                         * rescale
                     )
-                    stderr = terms.std() * np.sqrt(len(terms))
+                    stderr = terms.std() * np.sqrt(terms.numel() - 1)
                     print(f"JVP est {est}: {terms.sum():f} +/- {2 * stderr:f}")
+
+                    grads.check_tailedness(terms.flatten(), verbose=False)
 
                 tot_expected_effect = expected_effects.sum(0)
                 per_step_expected_effects.append(tot_expected_effect)
 
                 approx_new_outputs = tot_expected_effect + eval_outputs
-                minn, first, median, third, maxx = torch.quantile(
-                    approx_new_outputs,
-                    torch.tensor([0.0, 0.25, 0.5, 0.75, 1.0], device=io_device),
-                )
-                mean, std = approx_new_outputs.mean(), approx_new_outputs.std()
-                print(
-                    f"Approx new outputs: min {minn:.3f}, 1st {first:.3f}, median {median:.3f}, "
-                    f"3rd {third:.3f}, max {maxx:.3f}, mean {mean:.3f}, std {std:.3f}"
-                )
                 torch.save(
                     {
                         "ids": ds["id"][start : start + batch_size],
@@ -500,7 +498,6 @@ def train_and_save_model(
     eval_every: Optional[int] = None,
     save_every: Optional[int] = None,
     load_best_model_at_end: bool = False,
-    greater_is_better: bool = True,
     save_total_limit: Optional[int] = 1,
     store_grads: bool = False,
 ) -> tuple:

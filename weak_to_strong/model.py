@@ -4,10 +4,10 @@ from dataclasses import dataclass
 import torch
 from transformers import AutoConfig, AutoModelForCausalLM, PreTrainedModel
 from peft import (
-    get_peft_model,
-    LoraConfig,
-    TaskType,
-    PeftType,
+    get_peft_model,  # type: ignore
+    LoraConfig,  # type: ignore
+    TaskType,  # type: ignore
+    PeftType,  # type: ignore
     AutoPeftModelForCausalLM,  # type: ignore
 )
 from peft.tuners.lora.layer import LoraLayer
@@ -166,6 +166,7 @@ class TransformerWithHead(PreTrainedModel):
             ]  # [batch_size, num_choices]
             logits = torch.stack(logits_at_last)
         else:  # use learned head
+            assert choice_input_ids is None
             transformer_outputs = self.transformer(input_ids, output_hidden_states=True)
             hidden_states = torch.stack(
                 [
