@@ -177,7 +177,8 @@ def train_model(
                     "No checkpoint found "
                     "for the current step, "
                     "but load_best_model_at_end was set to True and the current step is "
-                    "best. Please set eval_every to a multiple of save_every."
+                    "best. Please set eval_every to a multiple of save_every, and less "
+                    "than the total number of steps."
                 )
                 best_eval = current_eval
                 best_step = step

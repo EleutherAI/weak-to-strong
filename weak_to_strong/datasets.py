@@ -402,11 +402,7 @@ quirky_templates = {
     "hemisphere": "{city}",
     "population": "{city}",
     "sciq": "{support}\n\n{question} {answer}",
-    # "sciq": "Name: Alice\n\nPassage 1:\n{support}\n\nQ1: "
-    #     '"{question}" Is the answer "{answer}"?\nA:',
     "sentiment": "{title}\n{review}",
-    # "sentiment": "Name: Alice\n\nTitle: {title}\n{review}\n\nQ: Does the above "
-    #     "review have a positive or negative sentiment?\nA:",
     "nli": "{premise}\n\n{hypothesis}",
     "authors": "{title}\n{author}",
     "addition": "{op1} | {op2} | {result}",
