@@ -49,15 +49,18 @@ def get_jacobians(
     n_eval = len(dataset)
 
     model_n_params = sum(p.numel() for p in model.parameters() if p.requires_grad)
+    if d_down == -1:
+        d_down = model_n_params
+        proj_basis_indices = None
+    else:
+        generator = torch.Generator().manual_seed(0)
+        proj_basis_indices = torch.randint(
+            0, model_n_params, (d_down,), generator=generator
+        )
+        proj_basis_indices, _ = proj_basis_indices.sort()
 
-    generator = torch.Generator().manual_seed(0)
-    proj_basis_indices = torch.randint(
-        0, model_n_params, (d_down,), generator=generator
-    )
-    proj_basis_indices, _ = proj_basis_indices.sort()
-
-    hash_proj_indices = md5(proj_basis_indices.numpy().tobytes()).hexdigest()
-    print(f"Hash(projection indices): {hash_proj_indices}")
+        hash_proj_indices = md5(proj_basis_indices.numpy().tobytes()).hexdigest()
+        print(f"Hash(projection indices): {hash_proj_indices}")
 
     proj_grads = -torch.ones((n_eval, d_down), device=io_device)
     fs = -torch.ones((n_eval,), device=io_device)
@@ -98,7 +101,10 @@ def get_jacobians(
 
 
 def gather_grad_components(
-    model, proj_basis_indices, io_device: str | int = "cuda", optimizer=None
+    model,
+    proj_basis_indices=None,
+    io_device: str | int = "cuda",
+    optimizer=None,
 ):
     """
     This avoids concatenating all the grads
@@ -108,6 +114,38 @@ def gather_grad_components(
     If optimizer passed is Adam, then we also normalize the gradients by the
     second moment estimate per Adam's update rule.
     """
+    if proj_basis_indices is None:
+        update = torch.cat(
+            [
+                p.grad.flatten().to(io_device)
+                for p in model.parameters()
+                if p.grad is not None
+            ]
+        )
+        if isinstance(optimizer, torch.optim.Adam):
+            arbitrary_param = next(
+                iter(p for p in model.parameters() if p.grad is not None)
+            )
+            step = optimizer.state[arbitrary_param].get("step", 0)
+            eps = float(optimizer.param_groups[0]["eps"])
+            if step > 0:
+                # normalize based on raw second moment estimates
+                beta2 = float(optimizer.param_groups[0]["betas"][1])
+                exp_avg_sq = torch.cat(
+                    [
+                        optimizer.state[p]["exp_avg_sq"].flatten().to(io_device)
+                        for p in model.parameters()
+                        if p.grad is not None
+                    ]
+                )
+                corrected_exp_avg = torch.sqrt(exp_avg_sq / (1 - beta2**step))
+            else:
+                corrected_exp_avg = update.abs()
+
+            update = update / (corrected_exp_avg + eps)
+        return update
+
+    assert (proj_basis_indices.diff() >= 0).all(), "proj_basis_indices must be sorted"
     proj_updates = torch.zeros((len(proj_basis_indices),), device=io_device)
     param_iter = iter(p for p in model.parameters() if p.grad is not None)
     param = next(param_iter)

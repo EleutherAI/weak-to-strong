@@ -54,9 +54,27 @@ def train_model(
     load_best_model_at_end: bool = False,
     save_total_limit: Optional[int] = 1,
     store_grads: bool = False,
-    n_sems: int = 3,
     max_val_size: int = 500,
     val_frac: float = 0.2,
+    store_grads_steps: list[int] = [
+        0,
+        1,
+        2,
+        3,
+        4,
+        10,
+        11,
+        12,
+        13,
+        14,
+        100,
+        101,
+        102,
+        103,
+        104,
+    ],
+    d_down=-1,
+    n_jacobians=1,
 ):
     """
     ds is a dataset of examples, each of which is a dict with keys:
@@ -195,11 +213,10 @@ def train_model(
             loss_tot = 0
 
             # compute behaviorally relevant directions in parameter space
-            if store_grads:
+            if store_grads and step in store_grads_steps:
                 assert (
                     final_eval_ds is not None
                 ), "must provide final_eval_ds if store_grads"
-                d_down = 10_000
                 (
                     downsampled_eval_jacobians,
                     eval_outputs,
@@ -207,7 +224,9 @@ def train_model(
                     model_n_params,
                 ) = grads.get_jacobians(
                     model=model,
-                    dataset=final_eval_ds,
+                    dataset=final_eval_ds.select(
+                        torch.randint(0, len(final_eval_ds), (n_jacobians,))
+                    ),
                     postprocess_logits_fn=grads.Diff(),
                     target_label_column="soft_label",  # is not used
                     d_down=d_down,
@@ -215,7 +234,11 @@ def train_model(
                     io_device=io_device,
                 )
                 downsampled_eval_jacobians = downsampled_eval_jacobians.to(io_device)
-                proj_basis_indices = proj_basis_indices.to(io_device)
+                proj_basis_indices = (
+                    proj_basis_indices
+                    if proj_basis_indices is None
+                    else proj_basis_indices.to(io_device)
+                )
                 if initial_eval_outputs is None:
                     initial_eval_outputs = eval_outputs
                 # note that these jacobians have only 1 (squeezed) column
@@ -255,15 +278,17 @@ def train_model(
             # train step
             all_logits = []
             all_labels = []
-            if store_grads:
+            if store_grads and step in store_grads_steps:
                 downsampled_cumul_grads = torch.full(
-                    (batch_size, d_down), fill_value=-100.0, device=io_device
+                    (1, model_n_params if d_down == -1 else d_down),
+                    fill_value=-1_000_000.0,
+                    device=io_device,
                 )
             for j, mbatch in tqdm(
                 enumerate(
                     to_batch(ds, minibatch_size, start=start, end=start + batch_size)
                 ),
-                disable=not store_grads,
+                disable=not (store_grads and step in store_grads_steps),
                 total=batch_size // minibatch_size,
             ):
                 input_ids = (
@@ -284,9 +309,8 @@ def train_model(
                 # we don't need to use a gradscaler because we're using bf16 instead of fp16
                 loss.backward()
 
-                if store_grads:
+                if store_grads and step in store_grads_steps and j == 0:
                     assert minibatch_size == 1
-
                     downsampled_cumul_grads[j, :] = grads.gather_grad_components(
                         model,
                         proj_basis_indices,
@@ -298,11 +322,14 @@ def train_model(
                 all_labels.extend(labels)
 
             # gradients accumulate, so we need to take the difference at the end
-            if store_grads:
-                assert (downsampled_cumul_grads == -100.0).float().sum() == 0  # type: ignore
+            if store_grads and step in store_grads_steps:
+                assert (downsampled_cumul_grads == -1_000_000.0).float().sum() == 0  # type: ignore
                 assert save_path is not None, "must provide save_path if store_grads"
                 downsampled_grads = downsampled_cumul_grads.diff(
-                    dim=0, prepend=downsampled_cumul_grads.new_zeros(1, d_down)
+                    dim=0,
+                    prepend=downsampled_cumul_grads.new_zeros(
+                        1, model_n_params if d_down == -1 else d_down
+                    ),
                 )
 
                 # compute expected effect on eval outputs
@@ -311,23 +338,54 @@ def train_model(
 
                 # the computed JVP only includes d_down of the model_n_params terms,
                 # so we expect the actual JVP to be `rescale` times larger
-                rescale = model_n_params / d_down  # type: ignore
+                rescale = model_n_params / (model_n_params if d_down == -1 else d_down)
                 expected_effects = rescale * jvps
 
-                for est in range(n_sems):
-                    batch_idx = np.random.choice(batch_size, size=1, replace=False)
-                    eval_idx = np.random.choice(
-                        len(eval_outputs), size=1, replace=False
+                # check the JVP estimate with varying d_down
+                jvp_results = []
+                jvp_terms = torch.einsum(
+                    "bi,ei->bei", downsampled_eval_jacobians, updates
+                )
+                for dd in [10_000, 1_000_000, 20_000_000, model_n_params]:
+                    n_trials = model_n_params // dd
+                    jvp_trials = torch.full(
+                        (
+                            n_trials,
+                            updates.shape[0],
+                            downsampled_eval_jacobians.shape[0],
+                        ),
+                        fill_value=-1_000_000.0,
+                        device=io_device,
                     )
-                    terms = (
-                        updates[batch_idx]
-                        * downsampled_eval_jacobians[eval_idx]
-                        * rescale
-                    )
-                    stderr = terms.std() * np.sqrt(terms.numel() - 1)
-                    print(f"JVP est {est}: {terms.sum():f} +/- {2 * stderr:f}")
+                    for trial in range(n_trials):
+                        rescale = model_n_params / dd
+                        if dd == model_n_params:
+                            actual_d_down = model_n_params
+                            jvp_trials[trial] = jvp_terms.sum(-1) * rescale
+                        else:
+                            subset_idxs = torch.randint(
+                                0, model_n_params, (dd,), device=io_device
+                            )
+                            subset_idxs = torch.unique(subset_idxs)
+                            actual_d_down = len(subset_idxs)
+                            jvp_trials[trial] = (
+                                jvp_terms[:, :, subset_idxs].sum(-1) * rescale
+                            )
 
-                    grads.check_tailedness(terms.flatten(), verbose=False)
+                    jvp_std = jvp_trials.std(0, unbiased=False).mean()
+                    jvp_results.append(
+                        {
+                            "step": step,
+                            "d_down": dd,
+                            "actual_d_down": actual_d_down,
+                            "jvp_trials": jvp_trials,
+                            "avg_jvp_std": jvp_std,
+                        }
+                    )
+
+                torch.save(
+                    jvp_results, os.path.join(save_path, f"jvp_approx_{step}.pt")
+                )
 
                 tot_expected_effect = expected_effects.sum(0)
                 per_step_expected_effects.append(tot_expected_effect)
@@ -411,14 +469,6 @@ def train_model(
 
             step += 1
             logger.dumpkvs()
-
-    if store_grads:
-        assert initial_eval_outputs is not None
-        approx_final_preds = sum(per_step_expected_effects) + initial_eval_outputs
-        mad = (approx_final_preds - eval_outputs).abs().mean().item()
-        print(
-            f"Mean absolute difference between Euler approx final preds and eval probs: {mad:.3f}"
-        )
 
     # save final checkpoint
     if save_every and checkpoint_name(step) not in ckpt_names:
