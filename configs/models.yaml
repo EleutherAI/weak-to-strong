@@ -182,8 +182,6 @@ models:
     default_lr: 1e-5
     eval_batch_size: 8
     lora_modules: *llama_mistral_qwen_modules
-    custom_kwargs:
-      attn_implementation: eager
 
   - name: Qwen/Qwen-1_8B
     memory: 3.67e9

@@ -37,12 +37,16 @@ class TransformerWithHead(PreTrainedModel):
     ):
         try:
             config = AutoConfig.from_pretrained(name, **kwargs)
-            lm = AutoModelForCausalLM.from_pretrained(name, **kwargs)
+            lm = AutoModelForCausalLM.from_pretrained(
+                name, attn_implementation="eager", **kwargs
+            )
         except OSError:
             print(
-                f"Could not find config for {name} on the hub. Assuming this is PEFT model"
+                f"Could not find config for {name} on the hub. Assuming this is a PEFT model"
             )
-            lm = AutoPeftModelForCausalLM.from_pretrained(name, **kwargs)
+            lm = AutoPeftModelForCausalLM.from_pretrained(
+                name, attn_implementation="eager", **kwargs
+            )
             lm = lm.merge_and_unload()
         config = lm.config
         super().__init__(config)
