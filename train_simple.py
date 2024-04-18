@@ -77,6 +77,7 @@ def main(
     save_total_limit: Optional[int] = 1,
     disable_lora: bool = False,
     store_grads: bool = False,
+    d_downsample: int = 1_000_000,
     # Using model_cfg_name allows you to use the model config specified by
     # model_cfg_name but request a different model from the hub
     model_cfg_name: Optional[str] = None,
@@ -159,6 +160,7 @@ def main(
         "save_total_limit": save_total_limit,
         "disable_lora": disable_lora,
         "store_grads": store_grads,
+        "d_downsample": d_downsample,
     }
 
     if weak_model_size is not None:
@@ -326,6 +328,7 @@ def main(
         load_best_model_at_end=load_best_model_at_end,
         save_total_limit=save_total_limit,
         store_grads=store_grads,
+        d_downsample=d_downsample,
     )
 
     if weak_ds is not None:

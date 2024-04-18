@@ -1,11 +1,8 @@
 from hashlib import md5
 
 from datasets import Dataset
-import numpy as np
 from tqdm.auto import tqdm
 import torch
-from scipy.stats import linregress
-import warnings
 
 from weak_to_strong.loss import LossFnBase
 from weak_to_strong.common import to_batch
@@ -108,6 +105,7 @@ def gather_grad_components(
     If optimizer passed is Adam, then we also normalize the gradients by the
     second moment estimate per Adam's update rule.
     """
+    assert proj_basis_indices.diff().min() >= 0
     proj_updates = torch.zeros((len(proj_basis_indices),), device=io_device)
     param_iter = iter(p for p in model.parameters() if p.grad is not None)
     param = next(param_iter)
@@ -142,32 +140,3 @@ def gather_grad_components(
         proj_updates[proj_i] = update
 
     return proj_updates
-
-
-def check_tailedness(sample: torch.Tensor, verbose=False, warning_p_val=0.05):
-    """
-    We can estimate how good our stderr estimate is by computing variance
-    with increasing sample sizes. Samples from heavy-tailed distributions
-    will usually larger variances with increasing sample size
-    """
-    assert sample.ndim == 1
-    sample = sample.detach().cpu().numpy()
-    n = len(sample)
-    ns = []
-    vars = []
-    while n > 1:
-        subsample = np.random.choice(sample, size=n, replace=True)
-        var = subsample.var()
-        ns.append(n)
-        vars.append(var)
-        n //= 2
-
-    ns, vars = np.array(ns)[::-1], np.array(vars)[::-1]
-    linreg = linregress(np.log(ns), vars)
-
-    if verbose:
-        print(f"regression of variance estimate onto log(sample size): {linreg}")
-        print("\t".join(f"{n},{var:.1E}" for n, var in zip(ns, vars)))
-
-    if linreg.pvalue < warning_p_val:  # type: ignore
-        warnings.warn(f"Sample variance is increasing with sample size: {linreg}")

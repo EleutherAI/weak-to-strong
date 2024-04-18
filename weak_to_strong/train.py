@@ -57,6 +57,7 @@ def train_model(
     n_sems: int = 3,
     max_val_size: int = 500,
     val_frac: float = 0.2,
+    d_downsample: int = 1_000_000,
 ):
     """
     ds is a dataset of examples, each of which is a dict with keys:
@@ -199,7 +200,7 @@ def train_model(
                 assert (
                     final_eval_ds is not None
                 ), "must provide final_eval_ds if store_grads"
-                d_down = 10_000
+                d_downsample = 10_000
                 (
                     downsampled_eval_jacobians,
                     eval_outputs,
@@ -210,7 +211,7 @@ def train_model(
                     dataset=final_eval_ds,
                     postprocess_logits_fn=grads.Diff(),
                     target_label_column="soft_label",  # is not used
-                    d_down=d_down,
+                    d_down=d_downsample,
                     step_frac=step / nsteps,
                     io_device=io_device,
                 )
@@ -257,7 +258,9 @@ def train_model(
             all_labels = []
             if store_grads:
                 downsampled_cumul_grads = torch.full(
-                    (batch_size, d_down), fill_value=-100.0, device=io_device
+                    (batch_size, d_downsample),
+                    fill_value=-1_000_000.0,
+                    device=io_device,
                 )
             for j, mbatch in tqdm(
                 enumerate(
@@ -299,10 +302,10 @@ def train_model(
 
             # gradients accumulate, so we need to take the difference at the end
             if store_grads:
-                assert (downsampled_cumul_grads == -100.0).float().sum() == 0  # type: ignore
+                assert (downsampled_cumul_grads == -1_000_000.0).float().sum() == 0  # type: ignore
                 assert save_path is not None, "must provide save_path if store_grads"
                 downsampled_grads = downsampled_cumul_grads.diff(
-                    dim=0, prepend=downsampled_cumul_grads.new_zeros(1, d_down)
+                    dim=0, prepend=downsampled_cumul_grads.new_zeros(1, d_downsample)
                 )
 
                 # compute expected effect on eval outputs
@@ -311,23 +314,8 @@ def train_model(
 
                 # the computed JVP only includes d_down of the model_n_params terms,
                 # so we expect the actual JVP to be `rescale` times larger
-                rescale = model_n_params / d_down  # type: ignore
+                rescale = model_n_params / d_downsample  # type: ignore
                 expected_effects = rescale * jvps
-
-                for est in range(n_sems):
-                    batch_idx = np.random.choice(batch_size, size=1, replace=False)
-                    eval_idx = np.random.choice(
-                        len(eval_outputs), size=1, replace=False
-                    )
-                    terms = (
-                        updates[batch_idx]
-                        * downsampled_eval_jacobians[eval_idx]
-                        * rescale
-                    )
-                    stderr = terms.std() * np.sqrt(terms.numel() - 1)
-                    print(f"JVP est {est}: {terms.sum():f} +/- {2 * stderr:f}")
-
-                    grads.check_tailedness(terms.flatten(), verbose=False)
 
                 tot_expected_effect = expected_effects.sum(0)
                 per_step_expected_effects.append(tot_expected_effect)
@@ -340,11 +328,16 @@ def train_model(
                         "proj_basis_indices": proj_basis_indices,
                         "step": step,
                         "lr": optimizer.param_groups[0]["lr"],
-                        "downsampled_eval_jacobians": downsampled_eval_jacobians,
                         "approx_new_outputs": approx_new_outputs,
                         "eval_outputs": eval_outputs,
                     },
                     os.path.join(save_path, f"gradients_{step}.pt"),
+                )
+                del (
+                    downsampled_cumul_grads,
+                    downsampled_grads,
+                    updates,
+                    downsampled_eval_jacobians,
                 )
 
             if len(all_logits) == 0:
@@ -411,14 +404,6 @@ def train_model(
 
             step += 1
             logger.dumpkvs()
-
-    if store_grads:
-        assert initial_eval_outputs is not None
-        approx_final_preds = sum(per_step_expected_effects) + initial_eval_outputs
-        mad = (approx_final_preds - eval_outputs).abs().mean().item()
-        print(
-            f"Mean absolute difference between Euler approx final preds and eval probs: {mad:.3f}"
-        )
 
     # save final checkpoint
     if save_every and checkpoint_name(step) not in ckpt_names:
@@ -501,6 +486,7 @@ def train_and_save_model(
     load_best_model_at_end: bool = False,
     save_total_limit: Optional[int] = 1,
     store_grads: bool = False,
+    d_downsample: int = 1_000_000,
 ) -> tuple:
     if eval_batch_size is None:
         eval_batch_size = batch_size
@@ -592,6 +578,7 @@ def train_and_save_model(
             load_best_model_at_end=load_best_model_at_end,
             save_total_limit=save_total_limit,
             store_grads=store_grads,
+            d_downsample=d_downsample,
         )
         print("Model training took", time.time() - start, "seconds")
 
