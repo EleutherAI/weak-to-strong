@@ -1,5 +1,6 @@
 results/
 wandb/
+venv/
 
 .vscode
 *.ipynb
