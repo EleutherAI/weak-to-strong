@@ -65,6 +65,7 @@ class TrainConfig:
     skip_if_exists: bool = False
     print_every: int = 10
     eval_batch_size: int = 32
+    disable_gradient_checkpointing: bool = False
 
     ### not passed in by the user ###
 
@@ -87,6 +88,8 @@ class TrainConfig:
         # override the model name if we're borrowing a model config from a different model
         if self.model_cfg_name is not None:
             mcfg["name"] = self.model_size
+        if self.disable_gradient_checkpointing:
+            mcfg["gradient_checkpointing"] = False
         self.model_config = ModelConfig(**mcfg)
         self.eval_batch_size = (
             self.eval_batch_size or self.model_config.eval_batch_size
@@ -146,10 +149,11 @@ class TrainConfig:
                 "model_config",
                 "loss_fn",
                 "eval_batch_size",
+                "disable_gradient_checkpointing",
             }
         }
         assert (
-            len(vars(self)) == 35
+            len(vars(self)) == 36
         ), f"!={len(vars(self))} Make sure to update effective_config if you modify TrainConfig!"
 
         if self.weak_labels_path is not None:

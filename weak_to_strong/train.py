@@ -54,6 +54,9 @@ def train_model(
     if cfg.d_downsample == "sqrt":
         # e.g. 7B -> 16.7m, 410m -> 4m
         d_downsample = int(200 * model_n_params**0.5)
+        print(
+            f"Setting d_downsample proportional to sqrt(model_n_params) = {d_downsample}"
+        )
     else:
         d_downsample = assert_type(int, cfg.d_downsample)
 
@@ -185,16 +188,12 @@ def train_model(
             # compute behaviorally relevant directions in parameter space
             if cfg.store_grads:
                 assert final_eval_ds is not None
-                (
-                    downsampled_eval_jacobians,
-                    eval_outputs,
-                    proj_basis_indices,
-                ) = grads.get_jacobians(
+                downsampled_eval_jacobians, eval_outputs = grads.get_jacobians(
                     model=model,
                     dataset=final_eval_ds,
                     postprocess_logits_fn=grads.Diff(),
                     target_label_column="soft_label",  # is not used
-                    d_down=d_downsample,
+                    d_downsample=d_downsample,
                     step_frac=step / nsteps,
                     io_device=grads_device,
                 )
@@ -277,31 +276,29 @@ def train_model(
                 # we don't need to use a gradscaler because we're using bf16 instead of fp16
                 loss.backward()
 
-                logodds.extend(logits.diff(dim=1).detach().cpu().numpy().flatten())
+                logodds.extend(logits.detach().diff(dim=1).cpu().flatten())
                 ids.extend(mbatch["id"])
 
                 if cfg.store_grads:
                     assert minibatch_size == 1
-
                     downsampled_cumul_grads[j, :] = grads.gather_grad_components(
                         model,
-                        proj_basis_indices,
+                        d_downsample,
+                        grads.get_reproducible_generator(),
                         io_device=grads_device,
                         optimizer=optimizer,
                     )
                 if cfg.store_hiddens:
                     h = torch.stack(
-                        hidden_states
-                    ).cpu()  # [n_layers, batch_size, seq_len, hidden_size]
+                        list(map(lambda x: x.detach().cpu(), hidden_states))
+                    )  # [lyr, bs, seq, d]
                     # grab the last token position at all layers
                     seq_lens = (input_ids != 0).sum(dim=-1).cpu()
                     h = torch.stack(
                         [h[:, i, seq_lens[i] - 1, :] for i in range(len(seq_lens))],
                         dim=1,
                     )
-                    h = (
-                        h.detach().bfloat16().transpose(0, 1)
-                    )  # [batch_size, n_layers, hidden_size]
+                    h = h.bfloat16().transpose(0, 1)  # [bs, lyr, d]
                     hiddens.append(h)
 
                 all_logits.extend(logits)
@@ -309,7 +306,7 @@ def train_model(
 
             # gradients accumulate, so we need to take the difference at the end
             if cfg.store_grads:
-                assert (downsampled_cumul_grads == torch.nan).float().sum() == 0  # type: ignore
+                assert not downsampled_cumul_grads.isnan().any()
                 downsampled_grads = downsampled_cumul_grads.diff(
                     dim=0, prepend=downsampled_cumul_grads.new_zeros(1, d_downsample)
                 )
@@ -331,7 +328,6 @@ def train_model(
                     {
                         "ids": ds["id"][start : start + cfg.batch_size],
                         "expected_effects": expected_effects,
-                        "proj_basis_indices": proj_basis_indices,
                         "step": step,
                         "lr": optimizer.param_groups[0]["lr"],
                         "approx_new_outputs": approx_new_outputs,

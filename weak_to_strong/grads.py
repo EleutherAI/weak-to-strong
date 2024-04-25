@@ -1,8 +1,7 @@
-from hashlib import md5
-
 from datasets import Dataset
 from tqdm.auto import tqdm
 import torch
+import numpy as np
 
 from weak_to_strong.loss import LossFnBase
 from weak_to_strong.common import to_batch
@@ -20,12 +19,16 @@ class Diff(LossFnBase):
         return logits[0, 1] - logits[0, 0]
 
 
+def get_reproducible_generator():
+    return torch.Generator().manual_seed(0)
+
+
 def get_jacobians(
     model: torch.nn.Module,
     dataset: Dataset,
     postprocess_logits_fn: LossFnBase = Sigmoid(),
     target_label_column: str = "soft_label",
-    d_down: int = 10_000_000,
+    d_downsample: int = 10_000_000,
     step_frac: float = 0,
     io_device: str | int = "cpu",
 ):
@@ -45,18 +48,7 @@ def get_jacobians(
     """
     n_eval = len(dataset)
 
-    model_n_params = sum(p.numel() for p in model.parameters() if p.requires_grad)
-
-    generator = torch.Generator().manual_seed(0)
-    proj_basis_indices = torch.randint(
-        0, model_n_params, (d_down,), generator=generator
-    )
-    proj_basis_indices, _ = proj_basis_indices.sort()
-
-    hash_proj_indices = md5(proj_basis_indices.numpy().tobytes()).hexdigest()
-    print(f"Hash(projection indices): {hash_proj_indices}")
-
-    proj_grads = -torch.ones((n_eval, d_down), device=io_device)
+    proj_grads = -torch.ones((n_eval, d_downsample), device=io_device)
     fs = -torch.ones((n_eval,), device=io_device)
 
     model.eval()
@@ -84,18 +76,21 @@ def get_jacobians(
         f.backward()
 
         proj_grads[i] = gather_grad_components(
-            model, proj_basis_indices, io_device=io_device
+            model,
+            d_downsample,
+            get_reproducible_generator(),
+            io_device=io_device,
         )
         fs[i] = f.item()
 
         # zero out grads
         model.zero_grad()
 
-    return proj_grads, fs, proj_basis_indices
+    return proj_grads, fs
 
 
 def gather_grad_components(
-    model, proj_indices, io_device: str | int = "cpu", optimizer=None
+    model, d_downsample, generator, io_device: str | int = "cpu", optimizer=None
 ):
     """
     This avoids concatenating all the grads
@@ -106,24 +101,21 @@ def gather_grad_components(
     second moment estimate per Adam's update rule.
     """
     proj_updates = []
+    model_n_params = sum(p.numel() for p in model.parameters() if p.grad is not None)
+    keep_prob = d_downsample / model_n_params
 
-    starts = (
-        torch.tensor([p.numel() for p in model.parameters()])
-        .cumsum(0)
-        .to(proj_indices.device)
-    )
-    meta_indices = torch.searchsorted(proj_indices, starts, right=True)
-    index_chunks = proj_indices.tensor_split(meta_indices.tolist())
-
-    # Adjust indices to be relative to the current parameter
-    for chunk, offset in zip(index_chunks[1:], starts[1:]):
-        chunk -= offset
-
-    for param, indices in zip(
-        model.parameters(), index_chunks
-    ):  # iterate over sorted projection indices
-        if len(indices) == 0:
+    for param in model.parameters():
+        if param.grad is None:
             continue
+
+        # NOTE: this produces indices that are not unique for the benefit of speed
+        # it's around ~1.8x faster for d_downsample=4_300_000 (out of 500_000_000)
+        # as compared to using a while loop to sample new indices until full
+        # (randperm is much slower still)
+        n_keep = int(np.ceil(keep_prob * param.numel()))
+        indices = torch.randint(
+            0, param.numel(), (n_keep,), generator=generator, device=io_device
+        )
 
         update = param.grad.flatten()[indices].to(io_device)
 
@@ -143,4 +135,9 @@ def gather_grad_components(
 
         proj_updates.append(update)
 
-    return torch.cat(proj_updates)
+    proj_updates = torch.cat(proj_updates)
+    # We have a few more than d_downsample updates, so we pick some to drop
+    # NOTE: For speed reasons (~1.5x compared to randperm) we choose to do the less diverse thing:
+    # We keep only the last d_downsample updates
+    # We keep the later gradients because they tend to be larger in magnitude
+    return proj_updates[-d_downsample:]
