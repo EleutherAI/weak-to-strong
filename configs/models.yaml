@@ -241,3 +241,13 @@ models:
     memory: 1.3e11
     eval_batch_size: 8
     lora_modules: *llama_mistral_qwen_modules
+
+  - name: meta-llama/Meta-Llama-3-8B
+    memory: 1.6e10
+    eval_batch_size: 8
+    lora_modules: *llama_mistral_qwen_modules
+
+  - name: meta-llama/Meta-Llama-3-70B
+    memory: 1.4e11
+    eval_batch_size: 8
+    lora_modules: *llama_mistral_qwen_modules

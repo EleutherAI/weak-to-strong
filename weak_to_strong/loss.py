@@ -131,3 +131,13 @@ class logconf_loss_fn(LossFnBase):
         target = labels * (1 - coef) + strong_preds.detach() * coef
         loss = torch.nn.functional.cross_entropy(logits, target, reduction="none")
         return loss.mean()
+
+
+LOSS_DICT = {
+    "logconf": logconf_loss_fn(),
+    "product": product_loss_fn(),
+    "xent": xent_loss(),
+    "kl": kl_loss(),
+}
+
+VALID_LOSSES: list[str] = list(LOSS_DICT.keys())

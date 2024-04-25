@@ -4,8 +4,6 @@ from typing import Optional
 
 import yaml
 
-from weak_to_strong.loss import logconf_loss_fn, product_loss_fn, xent_loss, kl_loss
-
 
 def load_config(config_path="configs/default.yaml"):
     """
@@ -146,34 +144,3 @@ MODELS_DICT: dict[str, dict] = {
         os.path.join(os.path.dirname(os.path.dirname(__file__)), "configs/models.yaml")
     )["models"]
 }
-
-
-LOSS_DICT = {
-    "logconf": logconf_loss_fn(),
-    "product": product_loss_fn(),
-    "xent": xent_loss(),
-    "kl": kl_loss(),
-}
-
-VALID_LOSSES: list[str] = list(LOSS_DICT.keys())
-
-
-def get_config_foldername(config: dict) -> str:
-    def shorten_key(key: str) -> str:
-        return "".join(word[0] for word in key.split("_"))
-
-    def shorten_value(value) -> str:
-        if isinstance(value, bool):
-            return "1" if value else "0"
-        elif isinstance(value, str):
-            value = value.split("/")[-1]
-            if "_" in value:
-                return "_".join(word[:4] for word in value.split("_"))
-            else:
-                return value
-        else:
-            return str(value)
-
-    return "-".join(
-        f"{shorten_key(k)}={shorten_value(v)}" for k, v in sorted(config.items())
-    )

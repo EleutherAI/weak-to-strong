@@ -25,9 +25,9 @@ def get_jacobians(
     dataset: Dataset,
     postprocess_logits_fn: LossFnBase = Sigmoid(),
     target_label_column: str = "soft_label",
-    d_down: int = 10_000,
+    d_down: int = 10_000_000,
     step_frac: float = 0,
-    io_device: str | int = "cuda",
+    io_device: str | int = "cpu",
 ):
     """
     Get the gradients of `postprocess_logits_fn(model(input))` with respect to
@@ -91,11 +91,11 @@ def get_jacobians(
         # zero out grads
         model.zero_grad()
 
-    return proj_grads, fs, proj_basis_indices, model_n_params
+    return proj_grads, fs, proj_basis_indices
 
 
 def gather_grad_components(
-    model, proj_indices, io_device: str | int = "cuda", optimizer=None
+    model, proj_indices, io_device: str | int = "cpu", optimizer=None
 ):
     """
     This avoids concatenating all the grads

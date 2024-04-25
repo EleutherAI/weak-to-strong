@@ -3,7 +3,6 @@ from dataclasses import dataclass
 from random import Random
 from typing import Any, Callable, Optional
 import hashlib
-import warnings
 
 from datasets import (
     Dataset as HfDataset,
@@ -67,6 +66,7 @@ def load_and_process_dataset(
     for split, n_docs in split_sizes.items():
         ds = cfg.loader(split)
         ds = ds.map(functools.partial(cfg.formatter, rng=Random(seed)))  # type: ignore
+        ds = ds.filter(lambda ex: ex["txt"] != "")  # remove empty texts
         if cfg.balance:
             ds = balance(ds, seed)
         try:
@@ -321,13 +321,13 @@ def format_anthropic_hh(ex, rng) -> dict:
         rej[rej_last_assistant:],
     )
     if ch_prompt != rej_prompt:
-        warnings.warn(f"Prefixs don't match in {ex}")
+        return dict(txt="", hard_label=False)  # empty texts are filtered out
     resps = [ch_response, rej_response]
     rng.shuffle(resps)
     txt = f"{ch_prompt}\n\n<|Completion 1|>{resps[0]}\n\n<|Completion 2|>{resps[1]}"
     return dict(
         txt=txt, hard_label=resps[1] == ch_response
-    )  # 1 if the second is better
+    )  # True if the second is better
 
 
 register_dataset(
