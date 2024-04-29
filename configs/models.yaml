@@ -141,6 +141,7 @@ models:
   - name: Qwen/Qwen1.5-0.5B
     memory: 1.2e9
     eval_batch_size: 16
+    default_lr: 1e-5
     lora_modules: *llama_mistral_qwen_modules
     custom_kwargs:
       trust_remote_code: true
@@ -148,6 +149,7 @@ models:
   - name: Qwen/Qwen1.5-1.8B
     memory: 3.67e9
     eval_batch_size: 8
+    default_lr: 3e-6
     lora_modules: *llama_mistral_qwen_modules
     custom_kwargs:
       trust_remote_code: true
@@ -155,6 +157,7 @@ models:
   - name: Qwen/Qwen1.5-4B
     memory: 8.5e9
     eval_batch_size: 8
+    default_lr: 3e-6
     lora_modules: *llama_mistral_qwen_modules
     custom_kwargs:
       trust_remote_code: true
@@ -162,6 +165,7 @@ models:
   - name: Qwen/Qwen1.5-7B
     memory: 1.6e10
     eval_batch_size: 8
+    default_lr: 1e-6
     lora_modules: *llama_mistral_qwen_modules
     custom_kwargs:
       trust_remote_code: true
@@ -169,6 +173,7 @@ models:
   - name: Qwen/Qwen1.5-14B
     memory: 3e10
     eval_batch_size: 8
+    default_lr: 3e-6
     lora_modules: *llama_mistral_qwen_modules
     custom_kwargs:
       trust_remote_code: true
@@ -179,7 +184,7 @@ models:
 
   - name: mistralai/Mistral-7B-v0.1
     memory: 1.5e10
-    default_lr: 1e-5
+    default_lr: 1e-6
     eval_batch_size: 8
     lora_modules: *llama_mistral_qwen_modules
 
@@ -244,6 +249,7 @@ models:
 
   - name: meta-llama/Meta-Llama-3-8B
     memory: 1.6e10
+    default_lr: 1e-6
     eval_batch_size: 8
     lora_modules: *llama_mistral_qwen_modules
 
