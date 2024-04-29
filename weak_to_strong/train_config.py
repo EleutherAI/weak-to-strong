@@ -24,6 +24,8 @@ class TrainConfig:
     n_test_docs: int = 10000
     model_size: str = "gpt2"
     lr: Optional[float] = None
+    # Use the default learning rate times this factor, or ignore and use `lr` if set
+    lr_factor: float = 1.0
     optim: Optional[str] = None
     epochs: int = 1
     seed: int = 0
@@ -48,6 +50,7 @@ class TrainConfig:
     # If you pass weak_labels_path, we will use that path for labels.
     # Otherwise we train on ground truth.
     weak_labels_path: Optional[str] = None
+    take_test_from_train: bool = False
     store_grads: bool = False
     d_downsample: Union[int, str] = "sqrt"
     store_hiddens: bool = False
@@ -114,8 +117,9 @@ class TrainConfig:
                     f" size {self.batch_size}. "
                     "LRs were tuned for bs=32."
                 )
+            self.lr *= self.lr_factor
 
-        self.optim = self.optim or self.model_config.default_optimizer
+        self.optim = (self.optim or self.model_config.default_optimizer).lower()
         self.loss_fn = LOSS_DICT[self.loss]  # type: ignore
 
         # modify batch sizes if we're running multiple replicas
@@ -153,7 +157,7 @@ class TrainConfig:
             }
         }
         assert (
-            len(vars(self)) == 36
+            len(vars(self)) == 38
         ), f"!={len(vars(self))} Make sure to update effective_config if you modify TrainConfig!"
 
         if self.weak_labels_path is not None:

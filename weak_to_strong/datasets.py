@@ -1,7 +1,7 @@
 import functools
 from dataclasses import dataclass
 from random import Random
-from typing import Any, Callable, Optional
+from typing import Any, Callable
 import hashlib
 
 from datasets import (
@@ -53,11 +53,16 @@ def balance(ds: HfDataset, seed: int):
 
 def load_and_process_dataset(
     ds_name: str,
+    split_sizes: dict,
     seed: int = 0,
-    split_sizes: Optional[dict] = None,
+    take_test_from_train: bool = False,
 ):
-    if split_sizes is None:
-        split_sizes = dict(train=None, test=None)
+    n_tr, n_te = split_sizes.get("train", 0), split_sizes.get("test", 0)
+    if take_test_from_train:
+        # in this case we gather excess documents from the train set, and
+        # at the end redistribute them to the test set
+        split_sizes["train"] = split_sizes["train"] + split_sizes["test"]
+        del split_sizes["test"]
 
     if ds_name not in _REGISTRY:
         raise ValueError(f"Unknown dataset {ds_name}, please register")
@@ -84,6 +89,11 @@ def load_and_process_dataset(
         )
         ds = ds.shuffle(seed=seed)  # shuffling a bit pointless for test set but wtv
         results[split] = ds
+
+    if take_test_from_train:
+        both = results["train"]
+        results["train"] = both.select(range(n_tr))
+        results["test"] = both.select(range(n_tr, n_tr + n_te))
     return results
 
 

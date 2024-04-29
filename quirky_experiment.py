@@ -7,8 +7,9 @@ import numpy as np
 import fire
 
 from weak_to_strong.datasets import load_and_process_dataset
+from weak_to_strong.train_config import TrainConfig
 from train_simple import main as train_simple_main
-from sweep import split_possible_string_list
+from sweep import split_possible_string_list, split_args_by_run_type
 
 
 def get_quirky_model_name(
@@ -107,19 +108,22 @@ def main(
     n_test_docs: int = 1_000,
     standardized_templates: bool = False,
     full_finetuning: bool = False,
-    **kwargs,
+    **args,
 ):
     """
     base_model_names: list of base model names, optionally include hub user id
     quirky_ds_names: list of quirky dataset names `x` such that "EleutherAI/quirky_x_raw"
-                     is the desired dataset name
+                     is the desired dataset name registered in `weak_to_strong/datasets.py`
     standardized_templates: whether to use the quirky model trained on standardized templates
     full_finetuning: whether to use the quirky model trained with full finetuning
     """
-    assert "n_train1_docs" not in kwargs, "Use n_train_docs instead of n_train1_docs"
-    assert "n_train2_docs" not in kwargs, "Use n_train_docs instead of n_train2_docs"
+    assert (
+        "n_inference_docs" not in args
+    ), "Use n_train_docs instead of n_inference_docs"
     quirky_ds_names = split_possible_string_list(quirky_ds_names)
     base_model_names = split_possible_string_list(base_model_names)
+
+    gt_args, w2s_args = split_args_by_run_type(args)
 
     for quirky_ds_abbrev in quirky_ds_names:
         # first create a weak_labels_path
@@ -127,7 +131,7 @@ def main(
             ds_name=f"quirky_{quirky_ds_abbrev}",
             n_train_docs=n_train_docs,
             n_test_docs=n_test_docs,
-            kwargs=kwargs,
+            kwargs=args,
         )
 
         for base_model_name in base_model_names:
@@ -142,16 +146,16 @@ def main(
             # then run gt and w2s runs on the provided model
             print(f"Running {model_id} on {quirky_ds_abbrev}...")
             try:
-                train_simple_main(
+                cfg = TrainConfig(
                     ds_name=f"quirky_{quirky_ds_abbrev}",
                     model_size=model_id,
                     model_cfg_name=base_model_name,
-                    skip_inference=True,
-                    n_train1_docs=n_train_docs,
-                    n_train2_docs=0,
+                    n_train_docs=n_train_docs,
+                    n_inference_docs=0,
                     n_test_docs=n_test_docs,
-                    **kwargs,
+                    **gt_args,
                 )
+                train_simple_main(cfg)
             except Exception as e:
                 print(
                     f"Failed to run ground truth {model_id} on {quirky_ds_abbrev}: {e}"
@@ -159,16 +163,18 @@ def main(
                 traceback.print_exc()
 
             try:
-                train_simple_main(
+                # run weak-to-strong
+                cfg = TrainConfig(
                     ds_name=f"quirky_{quirky_ds_abbrev}",
                     model_size=model_id,
                     model_cfg_name=base_model_name,
-                    weak_labels_path=weak_labels_path,
-                    n_train1_docs=n_train_docs,
-                    n_train2_docs=0,
+                    n_train_docs=n_train_docs,
+                    n_inference_docs=0,
                     n_test_docs=n_test_docs,
-                    **kwargs,
+                    weak_labels_path=weak_labels_path,
+                    **w2s_args,
                 )
+                train_simple_main(cfg)
             except Exception as e:
                 print(
                     f"Failed to run weak-to-strong {model_id} on {quirky_ds_abbrev}: {e}"

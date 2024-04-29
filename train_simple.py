@@ -31,10 +31,11 @@ def main(cfg: TrainConfig):
     # Load dataset
     dataset = load_and_process_dataset(
         cfg.ds_name,
-        seed=cfg.seed,
         split_sizes=dict(
             train=cfg.n_train_docs + cfg.n_inference_docs, test=cfg.n_test_docs
         ),
+        seed=cfg.seed,
+        take_test_from_train=cfg.take_test_from_train,
     )
 
     # Split the training dataset in half
@@ -103,7 +104,7 @@ def main(cfg: TrainConfig):
                     "weak_soft_label", weak_test_results["soft_pred"]
                 )  # type: ignore
                 assert test_ds["id"] == weak_test_results["id"], "IDs don't match"
-            except IndexError or AssertionError:
+            except (IndexError, AssertionError):
                 print(
                     "Weak test results don't match the test dataset, "
                     "some metrics will not be logged."

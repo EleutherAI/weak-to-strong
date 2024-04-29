@@ -129,6 +129,8 @@ def train_model(
     else:
         lr_scheduler = torch.optim.lr_scheduler.LambdaLR(optimizer, lr_schedule_fn)
 
+    # truncate to a multiple of the batch size
+    ds = ds.select(range(len(ds) - (len(ds) % cfg.batch_size)))
     ds.save_to_disk(os.path.join(cfg.save_path, "train_ds"))
 
     step = 0
@@ -182,7 +184,7 @@ def train_model(
 
     for epoch in range(cfg.epochs):
         # iterate over batches, skipping the last one if it's too small
-        for start in range(0, len(ds) - (len(ds) % cfg.batch_size), cfg.batch_size):
+        for start in range(0, len(ds), cfg.batch_size):
             loss_tot = 0
 
             # compute behaviorally relevant directions in parameter space
