@@ -318,6 +318,27 @@ register_dataset(
 )
 
 
+def format_hellaswag(ex, rng):
+    hard_label = int(rng.random() < 0.5)
+    if hard_label:
+        ans = ex["endings"][int(ex["label"])]
+    else:
+        ans = rng.choice([e for i, e in enumerate(ex["endings"]) if i != int(ex["label"])])
+
+    endings = "\n".join(ex["endings"])
+    txt = f'Context:\n{ex["ctx"]}\n\nContinuations:\n\n{endings}\n\nQ: Is "{ans}" the best continuation?'
+    return dict(txt=txt, hard_label=hard_label)
+
+
+register_dataset(
+    "hellaswag",
+    DatasetConfig(
+        loader=hf_loader("Rowan/hellaswag", split_names=dict(test="validation")),  # type: ignore
+        formatter=format_hellaswag,  # type: ignore
+    ),
+)
+
+
 def format_multirc(ex, rng):
     template = 'Passage:\n\n{paragraph}\n\nQ: "{question}" Is the answer "{answer}"?'
 
