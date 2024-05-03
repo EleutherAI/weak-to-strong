@@ -507,6 +507,20 @@ register_dataset(
     ),
 )
 
+
+def format_twitter_sentiment(ex, rng):
+    return dict(txt=ex['text'], hard_label=ex["label"])
+
+
+register_dataset(
+    "twitter-sentiment",
+    DatasetConfig(
+        loader=hf_loader("EleutherAI/twitter-sentiment"),  # type: ignore
+        formatter=format_twitter_sentiment,  # type: ignore
+    ),
+)
+
+
 SCIQ_N_TEST = 3000
 
 
