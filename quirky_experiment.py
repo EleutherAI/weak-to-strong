@@ -63,6 +63,8 @@ def create_weak_labels(
         "n_test_docs": n_test_docs,
         "results_folder": results_folder,
         "sweep_subfolder": sweep_subfolder,
+        "ds_name": ds_name,
+        "seed": seed,
     }
 
     weak_labels_subfolder = os.path.join(

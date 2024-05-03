@@ -69,7 +69,7 @@ def get_jacobians(
             .to(io_device)  # type: ignore
         )
         logits = model(
-            input_ids=input_ids, choice_input_ids=batch.get("choice_input_ids")
+            input_ids=input_ids,
         )
 
         f = postprocess_logits_fn(logits, label, step_frac=step_frac)

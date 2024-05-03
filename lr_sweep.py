@@ -16,7 +16,9 @@ models = [
 ]
 
 tasks = [
-    # {"ds_name": "sciq",},
+    {
+        "ds_name": "sciq",
+    },
     {
         "ds_name": "sciq",
         "loss": "kl",
@@ -44,27 +46,18 @@ common_args = {
     "eval_every": 50,
     "save_every": 50,
 }
-
-sweep_config = {
-    "method": "grid",
-    "metric": {"name": "eval/auroc", "goal": "maximize"},
-    "parameters": {
-        "lr": {
-            "values": [
-                1e-6,
-                3e-6,
-                1e-5,
-                3e-5,
-            ]
-        },
-    },
-}
+lrs = [
+    1e-6,
+    3e-6,
+    1e-5,
+    3e-5,
+]
 
 for model in models:
     print(f"--- Starting sweep for {model} ---")
     for task in tasks:
         print(f"---\tfor {task}---")
-        for lr in sweep_config["parameters"]["lr"]["values"]:
+        for lr in lrs:
             args = common_args.copy()
             args.update(task)
             args["model_size"] = model

@@ -11,7 +11,6 @@ from peft import (
     AutoPeftModelForCausalLM,  # type: ignore
 )
 from peft.tuners.lora.layer import LoraLayer
-from typing import Optional
 
 
 @dataclass
@@ -28,7 +27,6 @@ class TransformerWithHead(PreTrainedModel):
         self,
         name,
         lora_modules=None,
-        use_lm_head=False,
         linear_probe=False,
         lora_rank=8,
         lora_alpha=8,
@@ -53,7 +51,6 @@ class TransformerWithHead(PreTrainedModel):
         self.lm = lm
         self.name = name
         self.num_labels = config.num_labels
-        self.use_lm_head = use_lm_head
         self.lora_modules = lora_modules
 
         if lora_modules is not None:
@@ -76,29 +73,26 @@ class TransformerWithHead(PreTrainedModel):
 
         lm_head = getattr(self.lm, "lm_head", getattr(self.lm, "embed_out", None))
         assert isinstance(lm_head, torch.nn.Linear)
-        if use_lm_head:
-            print("Using LM head instead of learned head because choices are provided")
-            self.score = None
+
+        hidden_size = getattr(
+            config,
+            "word_embed_proj_dim",
+            getattr(config, "n_embd", getattr(config, "hidden_size", None)),
+        )
+        assert isinstance(hidden_size, int)
+        self.score = torch.nn.Linear(hidden_size, self.num_labels, bias=False).to(
+            lm_head.weight.dtype
+        )
+        torch.nn.init.normal_(self.score.weight, std=0.01 / hidden_size**0.5)
+        # remove the LM head so it isn't in model.parameters()
+        if hasattr(self.lm, "lm_head"):
+            del (
+                self.lm.lm_head
+            )  # TODO: this doesn't work with LoRA for some reason because of attribute hiding
+        elif hasattr(self.lm, "embed_out"):
+            del self.lm.embed_out
         else:
-            hidden_size = getattr(
-                config,
-                "word_embed_proj_dim",
-                getattr(config, "n_embd", getattr(config, "hidden_size", None)),
-            )
-            assert isinstance(hidden_size, int)
-            self.score = torch.nn.Linear(hidden_size, self.num_labels, bias=False).to(
-                lm_head.weight.dtype
-            )
-            torch.nn.init.normal_(self.score.weight, std=0.01 / hidden_size**0.5)
-            # remove the LM head so it isn't in model.parameters()
-            if hasattr(self.lm, "lm_head"):
-                del (
-                    self.lm.lm_head
-                )  # TODO: this doesn't work with LoRA for some reason because of attribute hiding
-            elif hasattr(self.lm, "embed_out"):
-                del self.lm.embed_out
-            else:
-                warnings.warn("Tried to remove LM head but it wasn't found.")
+            warnings.warn("Tried to remove LM head but it wasn't found.")
         self.linear_probe = linear_probe
 
     @property
@@ -116,8 +110,7 @@ class TransformerWithHead(PreTrainedModel):
     @property
     def lora_modules_to_save(self):
         save_modules: list = [m for m in self.lm.modules() if isinstance(m, LoraLayer)]
-        if self.score is not None:
-            save_modules.append(self.score)
+        save_modules.append(self.score)
         return save_modules
 
     def save_state_dict(self, path):
@@ -139,7 +132,7 @@ class TransformerWithHead(PreTrainedModel):
                 m.load_state_dict(sd, strict, assign)
 
     def gradient_checkpointing_enable(self):
-        model = self.transformer if self.score is not None else self.lm
+        model = self.transformer
         (
             model if hasattr(model, "save_pretrained") else model.module
         ).gradient_checkpointing_enable()
@@ -147,7 +140,6 @@ class TransformerWithHead(PreTrainedModel):
     def forward(
         self,
         input_ids: torch.LongTensor,
-        choice_input_ids: Optional[torch.LongTensor] = None,
         output_hidden_states: bool = False,
     ):
         """
@@ -155,36 +147,26 @@ class TransformerWithHead(PreTrainedModel):
 
         Parameters:
         input_ids (torch.LongTensor): Input tensor containing the token ids.
+        output_hidden_states (bool): Whether to output the hidden states of the model.
 
         Returns:
-        HeadOutput: Output dataclass containing the logits.
+        logits (torch.FloatTensor): The logits of the model.
+        [Optional] all_hidden_states (torch.FloatTensor): The hidden states of the model.
         """
         input_lens = (input_ids != 0).sum(dim=-1)
 
-        if self.score is None:  # use LM head
-            assert choice_input_ids is not None
-            outputs = self.lm(input_ids, output_hidden_states=True)
-            all_logits = outputs.logits
-            all_hidden_states = outputs.hidden_states
-            logits_at_last = [
-                all_logits[i, input_lens[i] - 1, choice_input_ids[i]]
+        transformer_outputs = self.transformer(input_ids, output_hidden_states=True)
+        hidden_states = torch.stack(
+            [
+                transformer_outputs[0][i, input_lens[i] - 1, :]
                 for i in range(len(input_lens))
-            ]  # [batch_size, num_choices]
-            logits = torch.stack(logits_at_last)
-        else:  # use learned head
-            assert choice_input_ids is None
-            transformer_outputs = self.transformer(input_ids, output_hidden_states=True)
-            hidden_states = torch.stack(
-                [
-                    transformer_outputs[0][i, input_lens[i] - 1, :]
-                    for i in range(len(input_lens))
-                ]
-            )
-            self.score.to(hidden_states.device)
-            if self.linear_probe:
-                hidden_states = hidden_states.detach()
-            logits = self.score(hidden_states)
-            all_hidden_states = transformer_outputs.hidden_states
+            ]
+        )
+        self.score.to(hidden_states.device)
+        if self.linear_probe:
+            hidden_states = hidden_states.detach()
+        logits = self.score(hidden_states)
+        all_hidden_states = transformer_outputs.hidden_states
 
         if output_hidden_states:
             return logits, all_hidden_states

@@ -67,7 +67,6 @@ def eval_loop(
             # run forward pass
             raw_logits, hidden_states = model(
                 input_ids,
-                choice_input_ids=batch.get("choice_input_ids"),
                 output_hidden_states=True,
             )
 
@@ -95,9 +94,6 @@ def eval_loop(
                 del r["txt"]
             if "weak_soft_label" in batch:
                 r["weak_soft_label"] = batch["weak_soft_label"]
-            if "choices" in batch:
-                r["choices"] = batch["choices"]
-                r["choice_input_ids"] = batch["choice_input_ids"]
             results.extend([dict(zip(r, t)) for t in zip(*r.values())])
 
         # compute metrics

@@ -42,8 +42,6 @@ def train_model(
     ds is a dataset of examples, each of which is a dict with keys:
     - input_ids: a list of token ids
     - soft_label: a list of soft label probabilities
-    - choice_input_ids (optional): a pair of token ids for the answer choices,
-        indicating to use the LM head of the model
     """
     is_w2s = cfg.is_w2s
     minibatch_size = assert_type(int, cfg.minibatch_size_per_replica)
@@ -221,16 +219,17 @@ def train_model(
             # save
             if (
                 cfg.save_every
-                and step % cfg.save_every == 0
-                and cfg.save_every < nsteps
+                and (step % cfg.save_every == 0 and cfg.save_every < nsteps)
+                or step == nsteps - 1
             ):
                 ckpt_names.append(checkpoint_name(step))
                 save(model, ckpt_names[-1])
                 delete_old_checkpoints()
 
             # eval
-            if cfg.eval_every and (
-                (step % cfg.eval_every == 0 and cfg.eval_every < nsteps)
+            if (
+                cfg.eval_every
+                and (step % cfg.eval_every == 0 and cfg.eval_every < nsteps)
                 or step == nsteps - 1
             ):
                 assert val_ds is not None
@@ -280,7 +279,6 @@ def train_model(
                 labels = torch.tensor(mbatch["soft_label"]).to(io_device)  # type: ignore
                 logits, hidden_states = model(
                     input_ids=input_ids,
-                    choice_input_ids=mbatch.get("choice_input_ids"),
                     output_hidden_states=True,
                 )
                 logits = logits.to(io_device)
@@ -497,9 +495,6 @@ def train_and_save_model(
     test_ds: datasets.Dataset,
     inference_ds: Optional[datasets.Dataset] = None,
 ) -> tuple:
-    # if the dataset has a "choice_input_ids" field, we use the LM head
-    use_lm_head = "choice_input_ids" in train_ds.features
-
     print(f"{get_gpu_mem_used() * 100:.2f}% of all GPU memory in use before training")
 
     already_trained = False
@@ -512,7 +507,6 @@ def train_and_save_model(
         model = TransformerWithHead.from_pretrained(
             cfg.model_config.name,
             lora_modules=cfg.model_config.lora_modules,
-            use_lm_head=use_lm_head,
             device_map="auto",
             linear_probe=cfg.linear_probe,
             **cfg.model_config.custom_kwargs,
@@ -522,7 +516,6 @@ def train_and_save_model(
         model = TransformerWithHead.from_pretrained(
             cfg.model_config.name,
             lora_modules=cfg.model_config.lora_modules,
-            use_lm_head=use_lm_head,
             linear_probe=cfg.linear_probe,
             **cfg.model_config.custom_kwargs,
         ).to(

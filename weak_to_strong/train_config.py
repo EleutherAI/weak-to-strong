@@ -83,6 +83,10 @@ class TrainConfig:
 
         self.is_w2s = self.weak_labels_path is not None
         self.loss = self.loss or ("kl" if self.is_w2s else "xent")
+        if self.loss != "xent" and not self.is_w2s:
+            raise ValueError(
+                "Only cross-entropy loss should be used for ground truth training"
+            )
 
         print(f"model_size: {self.model_size}, model_cfg_name: {self.model_cfg_name}")
         mcfg = MODELS_DICT[self.model_cfg_name or self.model_size].copy()

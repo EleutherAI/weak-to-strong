@@ -87,9 +87,6 @@ def main(cfg: TrainConfig):
     test_ds = tokenize_dataset(test_ds, tokenizer, cfg.max_ctx)  # type: ignore
     if inference_ds:
         inference_ds = tokenize_dataset(inference_ds, tokenizer, cfg.max_ctx)
-    if "for_lm_head" in cfg.ds_name:
-        assert "choice_input_ids" in train_ds.column_names
-        assert "choice_input_ids" in test_ds.column_names
 
     # try to add a weak_labels column to the test dataset if running w2s
     if cfg.weak_labels_path is not None:

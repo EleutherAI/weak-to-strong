@@ -23,7 +23,6 @@ class DatasetConfig:
     # split -> unshuffled dataset of items
     loader: Callable[[str], HfDataset]
     # formats items to have keys 'txt' and 'hard_label', takes a random.Random rng
-    # optionally also adds the key 'choices', a pair of strings, indicating to use the lm head
     formatter: Callable[[Any], Any]
     balance: bool = True
 
@@ -148,10 +147,6 @@ def tokenize_dataset(
         out = dict(
             input_ids=toks["input_ids"],
         )
-
-        if "choices" in ex:
-            choice_toks = [encode_choice(c, tokenizer) for c in ex["choices"]]
-            out["choice_input_ids"] = choice_toks
 
         return out
 
