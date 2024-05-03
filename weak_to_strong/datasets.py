@@ -35,7 +35,7 @@ def balance(ds: HfDataset, seed: int):
     """Undersample balance to 50/50"""
 
     label_counts = Counter(ds["hard_label"])
-    assert len(label_counts) == 2, "Dataset must be binary"
+    assert len(label_counts) == 2, f"Dataset must be binary {label_counts}"
 
     # undersample the majority class
     majority_label = max(label_counts, key=lambda k: label_counts[k])
@@ -62,6 +62,7 @@ def load_and_process_dataset(
     results = {}
     for split, n_docs in split_sizes.items():
         ds = cfg.loader(split)
+        ds = ds.shuffle(seed=seed)  # shuffling a bit pointless for test set but wtv
         try:
             ds = ds.select(range(n_docs))
         except IndexError:
@@ -76,7 +77,6 @@ def load_and_process_dataset(
                 "soft_label": [1 - float(ex["hard_label"]), float(ex["hard_label"])],
             }
         )
-        ds = ds.shuffle(seed=seed)  # shuffling a bit pointless for test set but wtv
         results[split] = ds
     return results
 
@@ -172,6 +172,123 @@ def hf_loader(*hf_name, split_names=None, n_test=None):
 ##########
 
 
+def format_anli(ex, rng):
+    txt = f"Premise: {ex['premise']}\nHypothesis: {ex['hypothesis']}\n\nDoes the premise entail the hypothesis?"
+    return dict(txt=txt, hard_label=ex['label'] == 0)
+
+
+register_dataset(
+    "anli-r2",
+    DatasetConfig(
+        loader=hf_loader("facebook/anli", split_names=dict(train="train_r2", test="test_r2")),  # type: ignore
+        formatter=format_anli,  # type: ignore
+    ),
+)
+
+
+def format_cola(ex, rng):
+    return dict(txt=ex["sentence"], hard_label=ex["label"])
+
+
+register_dataset(
+    "cola",
+    DatasetConfig(
+        loader=hf_loader("nyu-mll/glue", "cola", split_names=dict(test="validation")),  # type: ignore
+        formatter=format_cola,  # type: ignore
+    ),
+)
+
+
+def format_dream(ex, rng):
+    hard_label = int(rng.random() < 0.5)
+    if hard_label:
+        ans = ex["answer"]
+    else:
+        distractors = ex["choice"].copy()
+        distractors.remove(ex["answer"])
+
+        ans = rng.choice(distractors)
+
+    txt = f"Q: {ex['question']} A: {ans}"
+    return dict(txt=txt, hard_label=hard_label)
+
+
+register_dataset(
+    "dream",
+    DatasetConfig(
+        loader=hf_loader("dream"),  # type: ignore
+        formatter=format_dream,  # type: ignore
+    ),
+)
+
+
+def format_ethics_deontology(ex, rng):
+    ans = "yes" if ex["label"] else "no"
+    txt = f"Q: Is the following a morally valid excuse?\n\n{ex['scenario']}\n\n{ex['excuse']}\n\nA: {ans}"
+    return dict(txt=txt, hard_label=ex["label"])
+
+
+register_dataset(
+    "ethics-deontology",
+    DatasetConfig(
+        loader=hf_loader("hendrycks/ethics", "deontology"),  # type: ignore
+        formatter=format_ethics_deontology,  # type: ignore
+    ),
+)
+
+
+def format_ethics_justice(ex, rng):
+    ans = "yes" if ex["label"] else "no"
+    txt = f"Q: Does this statement exemplify justice?\n\n{ex['scenario']}\n\nA: {ans}"
+    return dict(txt=txt, hard_label=ex["label"])
+
+
+register_dataset(
+    "ethics-justice",
+    DatasetConfig(
+        loader=hf_loader("hendrycks/ethics", "justice"),  # type: ignore
+        formatter=format_ethics_justice,  # type: ignore
+    ),
+)
+
+
+def format_ethics_virtue(ex, rng):
+    ans = "yes" if ex["label"] else "no"
+    txt = f"Q: Does this behavior match the adjective that follows?\n\n{ex['scenario']}\n\nA: {ans}"
+    return dict(txt=txt, hard_label=ex["label"])
+
+
+register_dataset(
+    "ethics-virtue",
+    DatasetConfig(
+        loader=hf_loader("hendrycks/ethics", "virtue"),  # type: ignore
+        formatter=format_ethics_virtue,  # type: ignore
+    ),
+)
+
+
+def format_ethics_utilitarianism(ex, rng):
+    hard_label = int(rng.random() < 0.5)
+
+    choices = [ex["baseline"], ex["less_pleasant"]]
+    rng.shuffle(choices)
+
+    correct = choices.index(ex["baseline"])
+    response = correct if hard_label else 1 - correct
+
+    txt = f"Which is more pleasant?\n1) {choices[0]}\n2) {choices[1]} A: {response + 1}"
+    return dict(txt=txt, hard_label=hard_label)
+
+
+register_dataset(
+    "ethics-utilitarianism",
+    DatasetConfig(
+        loader=hf_loader("hendrycks/ethics", "utilitarianism"),  # type: ignore
+        formatter=format_ethics_utilitarianism,  # type: ignore
+    ),
+)
+
+
 def format_mc_taco(ex, rng):
     template = "{sentence}\n\nGiven the above, {question} Is the answer {answer}?"
     return dict(txt=template.format(**ex), hard_label=ex["label"])
@@ -197,6 +314,108 @@ register_dataset(
     DatasetConfig(
         loader=hf_loader("amazon_polarity"),  # type: ignore
         formatter=format_amazon_polarity,  # type: ignore
+    ),
+)
+
+
+def format_openbookqa(ex, rng):
+    hard_label = int(rng.random() < 0.5)
+    if hard_label:
+        ans = ex["answerKey"]
+    else:
+        letters = ex["choices"]["label"]
+
+        distractors = ex["choices"]["text"].copy()
+        del distractors[letters.index(ex["answerKey"])]
+        ans = rng.choice(distractors)
+
+    txt = f"Q: {ex['question_stem']}\n\nA: {ans}"
+    return dict(txt=txt, hard_label=hard_label)
+
+
+register_dataset(
+    "openbookqa",
+    DatasetConfig(
+        loader=hf_loader("allenai/openbookqa"),  # type: ignore
+        formatter=format_openbookqa,  # type: ignore
+    ),
+)
+
+
+def format_piqa(ex, rng):
+    hard_label = int(rng.random() < 0.5)
+
+    if hard_label:
+        ans = ex["sol2"] if ex["label"] else ex["sol1"]
+    else:
+        ans = ex["sol1"] if ex["label"] else ex["sol2"]
+
+    txt = f"Q: {ex['goal']} A: {ans}"
+    return dict(txt=txt, hard_label=hard_label)
+
+
+register_dataset(
+    "piqa",
+    DatasetConfig(
+        loader=hf_loader("piqa", split_names=dict(test="validation")),  # type: ignore
+        formatter=format_piqa,  # type: ignore
+    ),
+)
+
+
+def format_quartz(ex, rng):
+    template = 'Passage:\n{para}\n\nQ: "{question}" Is the answer "{answer}"?'
+    hard_label = int(rng.random() < 0.5)
+
+    correct_id = ex["choices"]["label"].index(ex["answerKey"])
+    ans = ex["choices"]["text"][correct_id if hard_label else 1 - correct_id]
+
+    txt = template.format(**ex, answer=ans)
+    return dict(txt=txt, hard_label=hard_label)
+
+
+register_dataset(
+    "quartz",
+    DatasetConfig(
+        loader=hf_loader("allenai/quartz"),  # type: ignore
+        formatter=format_quartz,  # type: ignore
+    ),
+)
+
+
+def format_social_i_qa(ex, rng):
+    template = 'Context:\n{context}\n\nQuestion: "{question}"\n\nChoices:\n{answerA}\n{answerB}\n{answerC}\n\nIs the answer "{answer}"?'
+    hard_label = int(rng.random() < 0.5)
+
+    answers = [ex["answerA"], ex["answerB"], ex["answerC"]]
+    correct_id = int(ex["label"]) - 1
+    if hard_label:
+        ans = answers[correct_id]
+    else:
+        ans = rng.choice([a for i, a in enumerate(answers) if i != correct_id])
+
+    txt = template.format(**ex, answer=ans)
+    return dict(txt=txt, hard_label=hard_label)
+
+
+register_dataset(
+    "social_i_qa",
+    DatasetConfig(
+        loader=hf_loader("social_i_qa", split_names=dict(test="validation")),  # type: ignore
+        formatter=format_social_i_qa,  # type: ignore
+    ),
+)
+
+
+def format_sst2(ex, rng):
+    return dict(txt=ex["sentence"], hard_label=ex["label"])
+
+
+register_dataset(
+    "sst2",
+    DatasetConfig(
+        loader=hf_loader("stanfordnlp/sst2", split_names=dict(test="validation")),  # type: ignore
+        formatter=format_sst2,  # type: ignore
     ),
 )
 
@@ -352,7 +571,7 @@ VALID_DATASETS: list[str] = list(_REGISTRY.keys())
 from datasets import disable_caching
 disable_caching()
 
-from weak_to_strong.datasets import load_dataset, VALID_DATASETS
+from weak_to_strong.datasets import load_and_process_dataset, VALID_DATASETS
 import numpy as np
 
 ds_name = "boolq"
