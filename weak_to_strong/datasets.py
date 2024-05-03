@@ -318,6 +318,22 @@ register_dataset(
 )
 
 
+def format_multirc(ex, rng):
+    template = 'Passage:\n\n{paragraph}\n\nQ: "{question}" Is the answer "{answer}"?'
+
+    txt = template.format(**ex)
+    return dict(txt=txt, hard_label=ex["label"])
+
+
+register_dataset(
+    "multirc",
+    DatasetConfig(
+        loader=hf_loader("super_glue", "multirc", split_names=dict(test="validation")),  # type: ignore
+        formatter=format_multirc,  # type: ignore
+    ),
+)
+
+
 def format_openbookqa(ex, rng):
     hard_label = int(rng.random() < 0.5)
     if hard_label:
