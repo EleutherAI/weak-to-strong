@@ -37,7 +37,7 @@ class ModelConfig:
         eval_batch_size (int, optional):
             The batch size for evaluation. Defaults to 32.
         minibatch_size_per_replica (int, optional):
-            The minibatch size per device. Defaults to None.
+            The minibatch size per device. Defaults to eval_batch_size.
         lora_modules (list[str], optional):
             The list of LORA modules. Defaults to None.
             If None, then LORA is not used.
