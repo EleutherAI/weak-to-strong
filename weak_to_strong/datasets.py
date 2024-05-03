@@ -379,6 +379,20 @@ register_dataset(
 )
 
 
+def format_paws(ex, rng):
+    template = "Sent 1: {sentence1}\nSent 2: {sentence2}\n\nQ: Are these sentences semantically equivalent?"
+    return dict(txt=template.format(**ex), hard_label=ex["label"])
+
+
+register_dataset(
+    "paws",
+    DatasetConfig(
+        loader=hf_loader("paws", "labeled_final"),  # type: ignore
+        formatter=format_paws,  # type: ignore
+    ),
+)
+
+
 def format_piqa(ex, rng):
     hard_label = int(rng.random() < 0.5)
 
