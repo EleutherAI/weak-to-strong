@@ -100,10 +100,12 @@ def main(cfg: TrainConfig):
             try:
                 weak_test_results = load_from_disk(weak_test_results_path)
                 # the last minibatch is dropped, so we don't have weak test results for it
-                test_ds = test_ds.select(range(len(weak_test_results))).add_column(
+                test_ds_ = test_ds.select(range(len(weak_test_results))).add_column(
                     "weak_soft_label", weak_test_results["soft_pred"]
                 )  # type: ignore
-                assert test_ds["id"] == weak_test_results["id"], "IDs don't match"
+                assert test_ds_["id"] == weak_test_results["id"], "IDs don't match"
+                # overwrite the test_ds with the new one once we've confirmed the IDs match
+                test_ds = test_ds_
             except (IndexError, AssertionError):
                 print(
                     "Weak test results don't match the test dataset, "

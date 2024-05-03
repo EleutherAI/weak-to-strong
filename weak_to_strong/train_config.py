@@ -111,12 +111,6 @@ class TrainConfig:
             # so we use a simple linear scaling otherwise
             # https://stackoverflow.com/questions/53033556/how-should-the-learning-rate-change-as-the-batch-size-change
             self.lr = self.model_config.default_lr * self.batch_size / 32
-            if self.batch_size != 32:
-                print(
-                    f"Scaling learning rate linearly to {self.lr} based on batch"
-                    f" size {self.batch_size}. "
-                    "LRs were tuned for bs=32."
-                )
             self.lr *= self.lr_factor
 
         self.optim = (self.optim or self.model_config.default_optimizer).lower()

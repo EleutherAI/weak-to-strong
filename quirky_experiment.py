@@ -1,7 +1,8 @@
 import traceback
-from typing import List, Union
+from typing import List, Optional, Union
 import os
 import json
+import warnings
 
 import numpy as np
 import fire
@@ -37,7 +38,8 @@ def create_weak_labels(
     ds_name: str,
     n_train_docs: int,
     n_test_docs: int,
-    kwargs,
+    weak_label_accuracy: Optional[float] = None,
+    **args,
 ):
     """
     ds_name: quirky dataset name of the form "quirky_x"
@@ -49,9 +51,11 @@ def create_weak_labels(
     - config.json: a dictionary with the weak "model" configuration.
 
     """
-    results_folder = kwargs.get("results_folder", "/tmp/results")
-    sweep_subfolder = kwargs.get("sweep_subfolder", "default")
-    seed = kwargs.get("seed", 0)
+    if "results_folder" not in args:
+        warnings.warn("No results_folder provided, using /tmp/results")
+    results_folder = args.get("results_folder", "/tmp/results")
+    sweep_subfolder = args.get("sweep_subfolder", "default")
+    seed = args.get("seed", 0)
 
     weak_model_config = {
         "model_size": "Bob",  # indicates Bob's labels
@@ -97,8 +101,112 @@ def create_weak_labels(
             .add_column("hard_pred", ds_dicts["weak"][split]["hard_label"])
             .add_column("soft_pred", ds_dicts["weak"][split]["soft_label"])
         )
+
+        if weak_label_accuracy is not None:
+            # resample weak labels to have a specified accuracy
+
+            is_correct = np.array(ds["hard_pred"]) == np.array(ds["hard_label"])
+            acc = is_correct.mean()
+            correct_indices = np.where(is_correct)[0]
+            incorrect_indices = np.where(~is_correct)[0]
+            if weak_label_accuracy == 1:
+                keep_indices = correct_indices
+            elif weak_label_accuracy == 0:
+                keep_indices = incorrect_indices
+            else:
+                desired_c_to_i_ratio = weak_label_accuracy / (1 - weak_label_accuracy)
+                if acc < weak_label_accuracy:
+                    n_correct_keep = is_correct.sum()
+                    n_incorrect_keep = int(n_correct_keep / desired_c_to_i_ratio)
+                    incorrect_indices = np.random.choice(
+                        incorrect_indices, n_incorrect_keep, replace=False
+                    )
+                else:
+                    n_incorrect_keep = (~is_correct).sum()
+                    n_correct_keep = int(n_incorrect_keep * desired_c_to_i_ratio)
+                    correct_indices = np.random.choice(
+                        correct_indices, n_correct_keep, replace=False
+                    )
+                keep_indices = np.concatenate([correct_indices, incorrect_indices])
+            ds = ds.select(keep_indices).shuffle(seed=seed)
+            new_gt, new_hard_pred = np.array(ds["hard_label"]), np.array(
+                ds["hard_pred"]
+            )
+            assert np.isclose(
+                (new_gt == new_hard_pred).mean(),
+                weak_label_accuracy,
+                atol=1 / len(new_gt),
+            )
+
         ds.save_to_disk(os.path.join(weak_labels_subfolder, save_name))
     return os.path.join(weak_labels_subfolder, "weak_labels")
+
+
+def pretrained_quirky(
+    quirky_ds_names: List[str],
+    strong_model_sizes: List[str],
+    n_train_docs: int = 10_000,
+    n_test_docs: int = 1_000,
+    weak_label_accuracy: Optional[float] = None,
+    **args,
+):
+    # resample weak labels to have a specified accuracy
+    assert (
+        "n_inference_docs" not in args
+    ), "Use n_train_docs instead of n_inference_docs"
+    quirky_ds_names = split_possible_string_list(quirky_ds_names)
+    strong_model_sizes = split_possible_string_list(strong_model_sizes)
+
+    gt_args, w2s_args = split_args_by_run_type(args)
+
+    for quirky_ds_abbrev in quirky_ds_names:
+        # first create a weak_labels_path
+        weak_labels_path = create_weak_labels(
+            ds_name=f"quirky_{quirky_ds_abbrev}",
+            n_train_docs=n_train_docs,
+            n_test_docs=n_test_docs,
+            weak_label_accuracy=weak_label_accuracy,
+            **gt_args,
+        )
+
+        for model_name in strong_model_sizes:
+            # then run gt and w2s runs on the provided model
+            print(f"Running {model_name} on {quirky_ds_abbrev}...")
+            try:
+                cfg = TrainConfig(
+                    ds_name=f"quirky_{quirky_ds_abbrev}",
+                    model_size=model_name,
+                    n_train_docs=n_train_docs,
+                    n_inference_docs=0,
+                    n_test_docs=n_test_docs,
+                    **gt_args,
+                )
+                train_simple_main(cfg)
+            except Exception as e:
+                print(
+                    f"Failed to run ground truth {model_name} on {quirky_ds_abbrev}: {e}"
+                )
+                traceback.print_exc()
+
+            try:
+                # run weak-to-strong
+                cfg = TrainConfig(
+                    ds_name=f"quirky_{quirky_ds_abbrev}",
+                    model_size=model_name,
+                    n_train_docs=n_train_docs,
+                    n_inference_docs=0,
+                    n_test_docs=n_test_docs,
+                    weak_labels_path=weak_labels_path,
+                    **w2s_args,
+                )
+                train_simple_main(cfg)
+            except Exception as e:
+                print(
+                    f"Failed to run weak-to-strong {model_name} on {quirky_ds_abbrev}: {e}"
+                )
+                traceback.print_exc()
+
+    print(f"Finished running models on {quirky_ds_names} x {strong_model_sizes}")
 
 
 def main(
@@ -186,4 +294,5 @@ def main(
 
 if __name__ == "__main__":
     # see train_simple.py for valid args
-    fire.Fire(main)
+    # fire.Fire(main)
+    fire.Fire(pretrained_quirky)

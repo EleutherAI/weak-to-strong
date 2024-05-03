@@ -13,6 +13,10 @@ from datasets import (
 
 from collections import Counter
 
+from datasets import disable_caching
+
+disable_caching()
+
 
 @dataclass
 class DatasetConfig:
@@ -198,6 +202,17 @@ def sciq_with_support_loader(*hf_name, split_names=None, n_test=None):
     return lambda split: base_loader(split).filter(lambda x: x["support"] != "")
 
 
+def quirky_sciq_loader(*hf_name, split_names=None, n_test=None):
+    """
+    Wraps hf_loader by filtering out examples without support
+    """
+    base_loader = hf_loader(*hf_name, split_names=split_names, n_test=n_test)
+
+    return lambda split: base_loader(split).filter(
+        lambda x: x["template_args"]["support"] != ""
+    )
+
+
 ##########
 # ACTUAL DATASETS
 ##########
@@ -250,52 +265,6 @@ register_dataset(
     DatasetConfig(
         loader=hf_loader("sciq", n_test=SCIQ_N_TEST),  # type: ignore
         formatter=format_sciq,  # type: ignore
-    ),
-)
-
-
-def format_sciq_for_lm_head(ex, rng):
-    hard_label = int(rng.random() < 0.5)
-    if hard_label:
-        ans = ex["correct_answer"]
-    else:
-        ans = rng.choice([ex["distractor1"], ex["distractor2"], ex["distractor3"]])
-
-    txt = f"Q: {ex['question']} A: {ans}. Is this correct?"
-    choices = (" No", " Yes")
-    return dict(txt=txt, hard_label=hard_label, choices=choices)
-
-
-register_dataset(
-    "sciq_for_lm_head",
-    DatasetConfig(
-        loader=hf_loader("sciq", n_test=SCIQ_N_TEST),  # type: ignore
-        formatter=format_sciq_for_lm_head,  # type: ignore
-    ),
-)
-
-
-def format_sciq_for_lm_head_with_support(ex, rng):
-    # from https://github.com/EleutherAI/elk-generalization
-    template = (
-        "Name: Bob\n\nPassage 1:\n{support}\n\nQ1: "
-        '"{question}" Is the answer "{answer}"?\nA:'
-    )
-    choices = (" No", " Yes")
-    hard_label = int(rng.random() < 0.5)
-    if hard_label:
-        ans = ex["correct_answer"]
-    else:
-        ans = rng.choice([ex["distractor1"], ex["distractor2"], ex["distractor3"]])
-    txt = template.format(support=ex["support"], question=ex["question"], answer=ans)
-    return dict(txt=txt, hard_label=hard_label, choices=choices)
-
-
-register_dataset(
-    "sciq_for_lm_head_with_support",
-    DatasetConfig(
-        loader=sciq_with_support_loader("sciq", n_test=SCIQ_N_TEST),  # type: ignore
-        formatter=format_sciq_for_lm_head_with_support,  # type: ignore
     ),
 )
 
@@ -411,9 +380,12 @@ quirky_templates = {
     "capitals": "{admin_name}, {country}\n\n{city}",
     "hemisphere": "{city}",
     "population": "{city}",
-    "sciq": "{support}\n\n{question} {answer}",
-    "sentiment": "{title}\n{review}",
-    "nli": "{premise}\n\n{hypothesis}",
+    # "sciq": "{support}\n\n{question} {answer}",
+    "sciq": "{support}\n\n{question} {answer}. Is this correct?",
+    # "sentiment": "{title}\n{review}",
+    "sentiment": "{title}\n{review}\n\nOverall rating:",
+    # "nli": "{premise}\n\n{hypothesis}",
+    "nli": "{premise}\n\n=>\n\n{hypothesis}. Does the implication hold?",
     "authors": "{title}\n{author}",
     "addition": "{op1} | {op2} | {result}",
     "subtraction": "{op1} | {op2} | {result}",
@@ -432,11 +404,12 @@ def format_quirky(ex, rng, ds_name, label_col="alice_label"):
 
 for ds_name in quirky_templates:
     for label_col in ["alice_label", "bob_label"]:
+        loader = quirky_sciq_loader if ds_name == "sciq" else hf_loader
         register_dataset(
             f"quirky_{ds_name}" + ("_weak" if label_col == "bob_label" else ""),
             DatasetConfig(
                 # NOTE: this is using the same examples as the quirky models were finetuned on
-                loader=hf_loader(f"EleutherAI/quirky_{ds_name}_raw"),  # type: ignore
+                loader=loader(f"EleutherAI/quirky_{ds_name}_raw"),  # type: ignore
                 formatter=functools.partial(
                     format_quirky, ds_name=ds_name, label_col=label_col
                 ),  # type: ignore

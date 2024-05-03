@@ -12,7 +12,7 @@ from transformers import get_linear_schedule_with_warmup
 
 import weak_to_strong.logger as logger
 from weak_to_strong.common import to_batch, get_gpu_mem_used
-from weak_to_strong.eval import eval_loop, compute_metrics
+from weak_to_strong.eval import eval_loop, compute_metrics, get_last_hidden_states
 from weak_to_strong.common import assert_type
 from weak_to_strong.model import TransformerWithHead
 from weak_to_strong.train_config import TrainConfig
@@ -54,9 +54,10 @@ def train_model(
     if cfg.d_downsample == "sqrt":
         # e.g. 7B -> 16.7m, 410m -> 4m
         d_downsample = int(200 * model_n_params**0.5)
-        print(
-            f"Setting d_downsample proportional to sqrt(model_n_params) = {d_downsample}"
-        )
+        if cfg.store_grads:
+            print(
+                f"Setting d_downsample proportional to sqrt(model_n_params) = {d_downsample}"
+            )
     else:
         d_downsample = assert_type(int, cfg.d_downsample)
 
@@ -132,6 +133,19 @@ def train_model(
     # truncate to a multiple of the batch size
     ds = ds.select(range(len(ds) - (len(ds) % cfg.batch_size)))
     ds.save_to_disk(os.path.join(cfg.save_path, "train_ds"))
+
+    if cfg.store_hiddens:
+        _, _, pretrain_hiddens = eval_loop(  # type: ignore
+            model,
+            ds,
+            cfg.eval_batch_size,
+            metric_prefix="pre_train",
+            remove_large_columns=True,
+            return_hiddens=True,
+        )
+        torch.save(
+            pretrain_hiddens, os.path.join(cfg.save_path, "pre_train_hiddens.pt")
+        )
 
     step = 0
     ids = []
@@ -215,13 +229,12 @@ def train_model(
                 delete_old_checkpoints()
 
             # eval
-            if (
-                cfg.eval_every
-                and step % cfg.eval_every == 0
-                and cfg.eval_every < nsteps
+            if cfg.eval_every and (
+                (step % cfg.eval_every == 0 and cfg.eval_every < nsteps)
+                or step == nsteps - 1
             ):
                 assert val_ds is not None
-                eval_results, eval_metrics = eval_loop(
+                eval_results, eval_metrics = eval_loop(  # type: ignore
                     model,
                     val_ds,
                     cfg.eval_batch_size,
@@ -291,17 +304,7 @@ def train_model(
                         optimizer=optimizer,
                     )
                 if cfg.store_hiddens:
-                    h = torch.stack(
-                        list(map(lambda x: x.detach().cpu(), hidden_states))
-                    )  # [lyr, bs, seq, d]
-                    # grab the last token position at all layers
-                    seq_lens = (input_ids != 0).sum(dim=-1).cpu()
-                    h = torch.stack(
-                        [h[:, i, seq_lens[i] - 1, :] for i in range(len(seq_lens))],
-                        dim=1,
-                    )
-                    h = h.bfloat16().transpose(0, 1)  # [bs, lyr, d]
-                    hiddens.append(h)
+                    hiddens.append(get_last_hidden_states(hidden_states, input_ids))
 
                 all_logits.extend(logits)
                 all_labels.extend(labels)
@@ -427,6 +430,32 @@ def train_model(
         hiddens = torch.cat(hiddens)
         torch.save(hiddens, os.path.join(cfg.save_path, "train_hiddens.pt"))
 
+    # load and and save best model
+    if cfg.load_best_model_at_end and best_step and best_step != step:
+        print(f"Loading best model from step {best_step}")
+        assert best_step is not None
+        assert maybe_load_model(
+            model, checkpoint_name(best_step)
+        ), f"Failed to load the best model from step {best_step}"
+    if cfg.save_every:
+        ckpt_names.append(os.path.join(cfg.save_path, "pytorch_model.bin"))
+        save(model, ckpt_names[-1])
+        delete_old_checkpoints()
+
+    # maybe compute hiddens with final model
+    if cfg.store_hiddens:
+        _, _, pretrain_hiddens = eval_loop(  # type: ignore
+            model,
+            ds,
+            cfg.eval_batch_size,
+            metric_prefix="post_train",
+            remove_large_columns=True,
+            return_hiddens=True,
+        )
+        torch.save(
+            pretrain_hiddens, os.path.join(cfg.save_path, "post_train_hiddens.pt")
+        )
+
     # final eval
     final_eval_results = None
     if cfg.eval_every:
@@ -434,7 +463,7 @@ def train_model(
         assert (
             final_eval_ds is not None
         ), "must provide eval_ds if eval_every is not None"
-        final_eval_results, final_eval_metrics = eval_loop(
+        final_eval_results, final_eval_metrics = eval_loop(  # type: ignore
             model,
             final_eval_ds,
             cfg.eval_batch_size,
@@ -447,19 +476,6 @@ def train_model(
             os.path.join(cfg.save_path, "eval_results_final")
         )
         eval_metrics = final_eval_metrics
-        update_best()
-
-    # load and and save best model
-    if cfg.load_best_model_at_end and best_step and best_step != step:
-        print(f"Loading best model from step {best_step}")
-        assert best_step is not None
-        assert maybe_load_model(
-            model, checkpoint_name(best_step)
-        ), f"Failed to load the best model from step {best_step}"
-    if cfg.save_every:
-        ckpt_names.append(os.path.join(cfg.save_path, "pytorch_model.bin"))
-        save(model, ckpt_names[-1])
-        delete_old_checkpoints()
 
     print("done.")
     return final_eval_results, final_eval_metrics
@@ -519,7 +535,7 @@ def train_and_save_model(
 
     if already_trained:
         print("Model already trained, skipping training")
-        test_results, test_metrics = eval_loop(
+        test_results, test_metrics = eval_loop(  # type: ignore
             model,
             test_ds,
             cfg.eval_batch_size,
@@ -538,7 +554,7 @@ def train_and_save_model(
 
     inference_results = None
     if inference_ds:
-        inference_results, inferenece_metrics = eval_loop(
+        inference_results, inferenece_metrics = eval_loop(  # type: ignore
             model,
             inference_ds,
             cfg.eval_batch_size,

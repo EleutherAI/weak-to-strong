@@ -92,7 +92,9 @@ class TransformerWithHead(PreTrainedModel):
             torch.nn.init.normal_(self.score.weight, std=0.01 / hidden_size**0.5)
             # remove the LM head so it isn't in model.parameters()
             if hasattr(self.lm, "lm_head"):
-                del self.lm.lm_head
+                del (
+                    self.lm.lm_head
+                )  # TODO: this doesn't work with LoRA for some reason because of attribute hiding
             elif hasattr(self.lm, "embed_out"):
                 del self.lm.embed_out
             else:
