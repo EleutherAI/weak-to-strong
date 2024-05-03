@@ -458,6 +458,20 @@ register_dataset(
     ),
 )
 
+
+def format_wic(ex, rng):
+    template = 'Sentence 1:\n{sentence1}\n\nSentence 2:\n{sentence2}\n\nQ: Does "{word}" have the same meaning in the above sentences?'
+    return dict(txt=template.format(**ex), hard_label=ex["label"])
+
+
+register_dataset(
+    "wic",
+    DatasetConfig(
+        loader=hf_loader("super_glue", "wic", split_names=dict(test="validation")),  # type: ignore
+        formatter=format_wic,  # type: ignore
+    ),
+)
+
 SCIQ_N_TEST = 3000
 
 
