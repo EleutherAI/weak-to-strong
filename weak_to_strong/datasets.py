@@ -363,6 +363,29 @@ register_dataset(
 )
 
 
+def format_quail(ex, rng):
+    template = 'Passage:\n\n{context}\n\nQ: "{question}" Is the answer "{answer}"?'
+    hard_label = int(rng.random() < 0.5)
+
+    correct_id = ex["correct_answer_id"]
+    if hard_label:
+        ans = ex["answers"][correct_id]
+    else:
+        ans = rng.choice([a for i, a in enumerate(ex["answers"]) if i != correct_id])
+
+    txt = template.format(**ex, answer=ans)
+    return dict(txt=txt, hard_label=hard_label)
+
+
+register_dataset(
+    "quail",
+    DatasetConfig(
+        loader=hf_loader("quail", split_names=dict(test="validation")),  # type: ignore
+        formatter=format_quail,  # type: ignore
+    ),
+)
+
+
 def format_quartz(ex, rng):
     template = 'Passage:\n{para}\n\nQ: "{question}" Is the answer "{answer}"?'
     hard_label = int(rng.random() < 0.5)
