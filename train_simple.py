@@ -45,7 +45,9 @@ def main(cfg: TrainConfig):
         # split off half for getting weak labels
         if cfg.n_inference_docs:
             split_data = train_dataset.train_test_split(
-                test_size=cfg.n_inference_docs, seed=cfg.seed
+                test_size=cfg.n_inference_docs
+                / (cfg.n_train_docs + cfg.n_inference_docs),
+                seed=cfg.seed,
             )
             train_ds, inference_ds = split_data["train"], split_data["test"]
         else:

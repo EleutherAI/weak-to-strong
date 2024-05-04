@@ -13,10 +13,6 @@ from datasets import (
 
 from collections import Counter
 
-from datasets import disable_caching
-
-disable_caching()
-
 
 @dataclass
 class DatasetConfig:
@@ -269,7 +265,7 @@ def format_ethics_deontology(ex, rng):
 
 
 register_dataset(
-    "ethics-deontology",
+    "ethics_deontology",
     DatasetConfig(
         loader=hf_loader("hendrycks/ethics", "deontology"),  # type: ignore
         formatter=format_ethics_deontology,  # type: ignore
@@ -284,7 +280,7 @@ def format_ethics_justice(ex, rng):
 
 
 register_dataset(
-    "ethics-justice",
+    "ethics_justice",
     DatasetConfig(
         loader=hf_loader("hendrycks/ethics", "justice"),  # type: ignore
         formatter=format_ethics_justice,  # type: ignore
@@ -299,7 +295,7 @@ def format_ethics_virtue(ex, rng):
 
 
 register_dataset(
-    "ethics-virtue",
+    "ethics_virtue",
     DatasetConfig(
         loader=hf_loader("hendrycks/ethics", "virtue"),  # type: ignore
         formatter=format_ethics_virtue,  # type: ignore
@@ -321,7 +317,7 @@ def format_ethics_utilitarianism(ex, rng):
 
 
 register_dataset(
-    "ethics-utilitarianism",
+    "ethics_utilitarianism",
     DatasetConfig(
         loader=hf_loader("hendrycks/ethics", "utilitarianism"),  # type: ignore
         formatter=format_ethics_utilitarianism,  # type: ignore
@@ -555,7 +551,7 @@ def format_twitter_sentiment(ex, rng):
 
 
 register_dataset(
-    "twitter-sentiment",
+    "twitter_sentiment",
     DatasetConfig(
         loader=hf_loader("EleutherAI/twitter-sentiment"),  # type: ignore
         formatter=format_twitter_sentiment,  # type: ignore
