@@ -158,16 +158,19 @@ def train_model(
     initial_eval_outputs = None
     hiddens = []
 
-    def delete_old_checkpoints():
+    def delete_old_checkpoints(final_cleanup=False):
         if cfg.save_total_limit is None:
             return
         num_to_delete = len(ckpt_names) - cfg.save_total_limit
-        # delete the oldest checkpoints that aren't the best or the most recent
-        to_delete = [
-            name
-            for name in ckpt_names[:-1]
-            if name != checkpoint_name(best_step) and name
-        ][:num_to_delete]
+        if final_cleanup:
+            to_delete = ckpt_names[:num_to_delete]
+        else:
+            # delete the oldest checkpoints that aren't the best or the most recent
+            to_delete = [
+                name
+                for name in ckpt_names[:-1]
+                if name != checkpoint_name(best_step) and name
+            ][:num_to_delete]
         for name in to_delete:
             ckpt_names.remove(name)
             os.remove(name)
@@ -438,7 +441,7 @@ def train_model(
     if cfg.save_every:
         ckpt_names.append(os.path.join(cfg.save_path, "pytorch_model.bin"))
         save(model, ckpt_names[-1])
-        delete_old_checkpoints()
+        delete_old_checkpoints(final_cleanup=True)
 
     # maybe compute hiddens with final model
     if cfg.store_hiddens:

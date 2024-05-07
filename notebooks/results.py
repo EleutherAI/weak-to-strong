@@ -180,7 +180,7 @@ class RunResult:
         )
 
 
-def find_run_paths(root: str, ds_name=None):
+def find_run_paths(root: str, ds_name=None, strong_model=None):
     """
     root: The parent folder of the three runs you'd like to load.
         Usually should be set to `os.path.join(results_folder, sweep_subfolder)`
@@ -201,6 +201,14 @@ def find_run_paths(root: str, ds_name=None):
             p
             for p, c in zip(candidates, configs)
             if "ds_name" not in c or c["ds_name"] == ds_name
+        ]
+    if strong_model is not None:
+        # keep runs with weak_labels or with the strong model
+        candidates = [
+            p
+            for p, c in zip(candidates, configs)
+            if c.get("model_size") == strong_model
+            or os.path.exists(os.path.join(p, "weak_labels"))
         ]
     assert (
         len(candidates) == 3
