@@ -6,6 +6,8 @@ from torch import nn
 from sklearn.metrics import roc_auc_score
 from weak_to_strong.common import to_batch
 
+from tqdm import tqdm
+
 
 def unpack(x):
     assert isinstance(x, torch.Tensor), type(x)
@@ -57,7 +59,7 @@ def eval_loop(
         results = []
         hiddens = []
 
-        for batch in to_batch(ds, eval_batch_size):
+        for batch in tqdm(to_batch(ds, eval_batch_size)):
             # pad input_ids to common length
             input_ids = torch.nn.utils.rnn.pad_sequence(
                 [torch.tensor(ex) for ex in batch["input_ids"]], batch_first=True
