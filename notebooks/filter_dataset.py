@@ -54,8 +54,7 @@ def main(ds_name, weak_labels_path=None):
 
     # filter dataset
     train_ds_untok = load_from_disk(weak_labels_path)
-    #breakpoint()
-    good_ds = train_ds_untok.select(good_points.nonzero())
+    good_ds = train_ds_untok.select(np.flatnonzero(good_points))
 
     # save dataset
     good_ds.save_to_disk(weak_labels_path + "_filtered")
