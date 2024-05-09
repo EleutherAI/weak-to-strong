@@ -1,7 +1,7 @@
 import functools
 from dataclasses import dataclass
 from random import Random
-from typing import Any, Callable, Optional
+from typing import Any, Callable
 import hashlib
 
 from datasets import (
@@ -19,8 +19,8 @@ class DatasetConfig:
     # split -> unshuffled dataset of items
     loader: Callable[[str], HfDataset]
     # formats items to have keys 'txt' and 'hard_label', takes a random.Random rng
-    # optionally also adds the key 'choices', a pair of strings, indicating to use the lm head
     formatter: Callable[[Any], Any]
+    balance: bool = True
 
 
 # mapping from dataset name to load function and format function
@@ -51,26 +51,35 @@ def balance(ds: HfDataset, seed: int):
 
 
 def load_and_process_dataset(
-    ds_name: str, seed: int = 0, split_sizes: Optional[dict] = None
+    ds_name: str,
+    split_sizes: dict,
+    seed: int = 0,
+    take_test_from_train: bool = False,
 ):
-    if split_sizes is None:
-        split_sizes = dict(train=None, test=None)
+    n_tr, n_te = split_sizes.get("train", 0), split_sizes.get("test", 0)
+    if take_test_from_train:
+        # in this case we gather excess documents from the train set, and
+        # at the end redistribute them to the test set
+        split_sizes["train"] = split_sizes["train"] + split_sizes["test"]
+        del split_sizes["test"]
 
     if ds_name not in _REGISTRY:
         raise ValueError(f"Unknown dataset {ds_name}, please register")
     cfg = _REGISTRY[ds_name]
     results = {}
     for split, n_docs in split_sizes.items():
-        ds = cfg.loader(split)
-        ds = ds.shuffle(seed=seed)  # shuffling a bit pointless for test set but wtv
+        ds = cfg.loader(split).shuffle(seed=seed)
+        ds = ds.map(functools.partial(cfg.formatter, rng=Random(seed)))  # type: ignore
+        ds = ds.filter(lambda ex: ex["txt"] != "")  # remove empty texts
+        if cfg.balance:
+            ds = balance(ds, seed)
         try:
             ds = ds.select(range(n_docs))
         except IndexError:
-            print(f"Warning {ds_name} has less than {n_docs} docs, using all {len(ds)}")
-        ds = balance(
-            ds.map(functools.partial(cfg.formatter, rng=Random(seed))),  # type: ignore
-            seed,
-        )
+            print(
+                f"Warning {ds_name} has < {n_docs} docs after balancing, using all {len(ds)}"
+            )
+
         ds = ds.map(
             lambda ex: {
                 "id": hashlib.sha1(ex["txt"].encode()).hexdigest()[:8],
@@ -78,6 +87,11 @@ def load_and_process_dataset(
             }
         )
         results[split] = ds
+
+    if take_test_from_train:
+        both = results["train"]
+        results["train"] = both.select(range(n_tr))
+        results["test"] = both.select(range(n_tr, n_tr + n_te))
     return results
 
 
@@ -92,7 +106,6 @@ def encode_choice(text, tokenizer):
     # some tokenizers split off the leading whitespace character
     if tokenizer.decode(c_ids[0]).strip() == "":
         c_ids = c_ids[1:]
-        assert c_ids == tokenizer.encode(text.lstrip(), add_special_tokens=False)
 
     c_ids = tuple(c_ids)
     if len(c_ids) != 1 and c_ids not in warned_about_choices:
@@ -125,22 +138,17 @@ def tokenize_dataset(
     """
 
     def process_function(ex):
-        toks = tokenizer(ex["txt"])
+        toks = tokenizer(ex["txt"], max_length=max_ctx, truncation=True)
         out = dict(
             input_ids=toks["input_ids"],
         )
 
-        if "choices" in ex:
-            choice_toks = [encode_choice(c, tokenizer) for c in ex["choices"]]
-            out["choice_input_ids"] = choice_toks
-
         return out
 
     ds = raw_ds.map(process_function, batched=False)
-    pre_len = len(ds)
-    ds = ds.filter(lambda x: len(x["input_ids"]) < max_ctx)
+    num_max_len = sum(len(x["input_ids"]) == max_ctx for x in ds)  # type: ignore
     print(
-        f"Filtered {100 * (1 - len(ds) / pre_len):.2f}% of examples for being too long"
+        f"{100 * num_max_len / len(ds):.2f}% of examples (truncated to) max length of {max_ctx}"
     )
     return ds
 
@@ -152,19 +160,47 @@ def hf_loader(*hf_name, split_names=None, n_test=None):
     If `n_test` is provided, it will concatenate all splits together
     and then take a deterministic test set of size `n_test` from it.
     """
-    if n_test is not None:
-        assert split_names is None
-        ds = hf_load_dataset(*hf_name)
-        if isinstance(ds, HfDatasetDict):
-            ds = concatenate_datasets(ds.values())  # type: ignore
-        assert isinstance(ds, HfDataset)
-        splits = ds.train_test_split(test_size=n_test, seed=0)
-        return lambda split: splits[split]
 
-    if split_names is None:
-        split_names = dict()
+    # this thunk avoids loading datasets at import time
+    def thunk(split):
+        nonlocal split_names
+        if n_test is not None:
+            assert split_names is None
+            ds = hf_load_dataset(*hf_name)
+            if isinstance(ds, HfDatasetDict):
+                ds = concatenate_datasets(ds.values())  # type: ignore
+            assert isinstance(ds, HfDataset)
+            # the seed is fixed so that all runs use the same test pool
+            splits = ds.train_test_split(test_size=n_test, seed=0)
 
-    return lambda split: hf_load_dataset(*hf_name, split=split_names.get(split, split))
+            return splits[split]
+
+        if split_names is None:
+            split_names = dict()
+
+        return hf_load_dataset(*hf_name, split=split_names.get(split, split))
+
+    return thunk
+
+
+def sciq_with_support_loader(*hf_name, split_names=None, n_test=None):
+    """
+    Wraps hf_loader by filtering out examples without support
+    """
+    base_loader = hf_loader(*hf_name, split_names=split_names, n_test=n_test)
+
+    return lambda split: base_loader(split).filter(lambda x: x["support"] != "")
+
+
+def quirky_sciq_loader(*hf_name, split_names=None, n_test=None):
+    """
+    Wraps hf_loader by filtering out examples without support
+    """
+    base_loader = hf_loader(*hf_name, split_names=split_names, n_test=n_test)
+
+    return lambda split: base_loader(split).filter(
+        lambda x: x["template_args"]["support"] != ""
+    )
 
 
 ##########
@@ -173,14 +209,14 @@ def hf_loader(*hf_name, split_names=None, n_test=None):
 
 
 def format_anli(ex, rng):
-    txt = f"Premise: {ex['premise']}\nHypothesis: {ex['hypothesis']}\n\nDoes the premise entail the hypothesis?"
-    return dict(txt=txt, hard_label=ex['label'] == 0)
+    txt = f"Premise: {ex['premise']}\nHypothesis: {ex['hypothesis']}\n\nDoes the premise entail the hypothesis?"  # noqa: E501
+    return dict(txt=txt, hard_label=ex["label"] == 0)
 
 
 register_dataset(
     "anli-r2",
     DatasetConfig(
-        loader=hf_loader("facebook/anli", split_names=dict(train="train_r2", test="test_r2")),  # type: ignore
+        loader=hf_loader("facebook/anli", split_names=dict(train="train_r2", test="test_r2")),  # type: ignore  # noqa: E501
         formatter=format_anli,  # type: ignore
     ),
 )
@@ -193,7 +229,7 @@ def format_cola(ex, rng):
 register_dataset(
     "cola",
     DatasetConfig(
-        loader=hf_loader("nyu-mll/glue", "cola", split_names=dict(test="validation")),  # type: ignore
+        loader=hf_loader("nyu-mll/glue", "cola", split_names=dict(test="validation")),  # type: ignore  # noqa: E501
         formatter=format_cola,  # type: ignore
     ),
 )
@@ -224,12 +260,12 @@ register_dataset(
 
 def format_ethics_deontology(ex, rng):
     ans = "yes" if ex["label"] else "no"
-    txt = f"Q: Is the following a morally valid excuse?\n\n{ex['scenario']}\n\n{ex['excuse']}\n\nA: {ans}"
+    txt = f"Q: Is the following a morally valid excuse?\n\n{ex['scenario']}\n\n{ex['excuse']}\n\nA: {ans}"  # noqa: E501
     return dict(txt=txt, hard_label=ex["label"])
 
 
 register_dataset(
-    "ethics-deontology",
+    "ethics_deontology",
     DatasetConfig(
         loader=hf_loader("hendrycks/ethics", "deontology"),  # type: ignore
         formatter=format_ethics_deontology,  # type: ignore
@@ -244,7 +280,7 @@ def format_ethics_justice(ex, rng):
 
 
 register_dataset(
-    "ethics-justice",
+    "ethics_justice",
     DatasetConfig(
         loader=hf_loader("hendrycks/ethics", "justice"),  # type: ignore
         formatter=format_ethics_justice,  # type: ignore
@@ -254,12 +290,12 @@ register_dataset(
 
 def format_ethics_virtue(ex, rng):
     ans = "yes" if ex["label"] else "no"
-    txt = f"Q: Does this behavior match the adjective that follows?\n\n{ex['scenario']}\n\nA: {ans}"
+    txt = f"Q: Does this behavior match the adjective that follows?\n\n{ex['scenario']}\n\nA: {ans}"  # noqa: E501
     return dict(txt=txt, hard_label=ex["label"])
 
 
 register_dataset(
-    "ethics-virtue",
+    "ethics_virtue",
     DatasetConfig(
         loader=hf_loader("hendrycks/ethics", "virtue"),  # type: ignore
         formatter=format_ethics_virtue,  # type: ignore
@@ -281,7 +317,7 @@ def format_ethics_utilitarianism(ex, rng):
 
 
 register_dataset(
-    "ethics-utilitarianism",
+    "ethics_utilitarianism",
     DatasetConfig(
         loader=hf_loader("hendrycks/ethics", "utilitarianism"),  # type: ignore
         formatter=format_ethics_utilitarianism,  # type: ignore
@@ -323,10 +359,12 @@ def format_hellaswag(ex, rng):
     if hard_label:
         ans = ex["endings"][int(ex["label"])]
     else:
-        ans = rng.choice([e for i, e in enumerate(ex["endings"]) if i != int(ex["label"])])
+        ans = rng.choice(
+            [e for i, e in enumerate(ex["endings"]) if i != int(ex["label"])]
+        )
 
     endings = "\n".join(ex["endings"])
-    txt = f'Context:\n{ex["ctx"]}\n\nContinuations:\n\n{endings}\n\nQ: Is "{ans}" the best continuation?'
+    txt = f'Context:\n{ex["ctx"]}\n\nContinuations:\n\n{endings}\n\nQ: Is "{ans}" the best continuation?'  # noqa: E501
     return dict(txt=txt, hard_label=hard_label)
 
 
@@ -349,7 +387,7 @@ def format_multirc(ex, rng):
 register_dataset(
     "multirc",
     DatasetConfig(
-        loader=hf_loader("super_glue", "multirc", split_names=dict(test="validation")),  # type: ignore
+        loader=hf_loader("super_glue", "multirc", split_names=dict(test="validation")),  # type: ignore  # noqa: E501
         formatter=format_multirc,  # type: ignore
     ),
 )
@@ -380,7 +418,7 @@ register_dataset(
 
 
 def format_paws(ex, rng):
-    template = "Sent 1: {sentence1}\nSent 2: {sentence2}\n\nQ: Are these sentences semantically equivalent?"
+    template = "Sent 1: {sentence1}\nSent 2: {sentence2}\n\nQ: Are these sentences semantically equivalent?"  # noqa: E501
     return dict(txt=template.format(**ex), hard_label=ex["label"])
 
 
@@ -458,7 +496,7 @@ register_dataset(
 
 
 def format_social_i_qa(ex, rng):
-    template = 'Context:\n{context}\n\nQuestion: "{question}"\n\nChoices:\n{answerA}\n{answerB}\n{answerC}\n\nIs the answer "{answer}"?'
+    template = 'Context:\n{context}\n\nQuestion: "{question}"\n\nChoices:\n{answerA}\n{answerB}\n{answerC}\n\nIs the answer "{answer}"?'  # noqa: E501
     hard_label = int(rng.random() < 0.5)
 
     answers = [ex["answerA"], ex["answerB"], ex["answerC"]]
@@ -495,7 +533,7 @@ register_dataset(
 
 
 def format_wic(ex, rng):
-    template = 'Sentence 1:\n{sentence1}\n\nSentence 2:\n{sentence2}\n\nQ: Does "{word}" have the same meaning in the above sentences?'
+    template = 'Sentence 1:\n{sentence1}\n\nSentence 2:\n{sentence2}\n\nQ: Does "{word}" have the same meaning in the above sentences?'  # noqa: E501
     return dict(txt=template.format(**ex), hard_label=ex["label"])
 
 
@@ -509,11 +547,11 @@ register_dataset(
 
 
 def format_twitter_sentiment(ex, rng):
-    return dict(txt=ex['text'], hard_label=ex["label"])
+    return dict(txt=ex["text"], hard_label=ex["label"])
 
 
 register_dataset(
-    "twitter-sentiment",
+    "twitter_sentiment",
     DatasetConfig(
         loader=hf_loader("EleutherAI/twitter-sentiment"),  # type: ignore
         formatter=format_twitter_sentiment,  # type: ignore
@@ -544,52 +582,6 @@ register_dataset(
 )
 
 
-def format_sciq_for_lm_head(ex, rng):
-    hard_label = int(rng.random() < 0.5)
-    if hard_label:
-        ans = ex["correct_answer"]
-    else:
-        ans = rng.choice([ex["distractor1"], ex["distractor2"], ex["distractor3"]])
-
-    txt = f"Q: {ex['question']} A: {ans}. Is this correct?"
-    choices = (" No", " Yes")
-    return dict(txt=txt, hard_label=hard_label, choices=choices)
-
-
-register_dataset(
-    "sciq_for_lm_head",
-    DatasetConfig(
-        loader=hf_loader("sciq", n_test=SCIQ_N_TEST),  # type: ignore
-        formatter=format_sciq_for_lm_head,  # type: ignore
-    ),
-)
-
-
-def format_sciq_for_lm_head_with_support(ex, rng):
-    # from https://github.com/EleutherAI/elk-generalization
-    template = (
-        "Name: Bob\n\nPassage 1:\n{support}\n\nQ1: "
-        '"{question}" Is the answer "{answer}"?\nA:'
-    )
-    choices = (" No", " Yes")
-    hard_label = int(rng.random() < 0.5)
-    if hard_label:
-        ans = ex["correct_answer"]
-    else:
-        ans = rng.choice([ex["distractor1"], ex["distractor2"], ex["distractor3"]])
-    txt = template.format(support=ex["support"], question=ex["question"], answer=ans)
-    return dict(txt=txt, hard_label=hard_label, choices=choices)
-
-
-register_dataset(
-    "sciq_for_lm_head_with_support",
-    DatasetConfig(
-        loader=hf_loader("sciq", n_test=SCIQ_N_TEST),  # type: ignore
-        formatter=format_sciq_for_lm_head_with_support,  # type: ignore
-    ),
-)
-
-
 def format_sciq_with_support(ex, rng):
     # from https://github.com/EleutherAI/elk-generalization
     template = 'Name: Bob\n\nPassage 1:\n{support}\n\nQ1: "{question}" Is the answer "{answer}"?'
@@ -605,16 +597,29 @@ def format_sciq_with_support(ex, rng):
 register_dataset(
     "sciq_with_support",
     DatasetConfig(
-        loader=hf_loader("sciq", n_test=SCIQ_N_TEST),  # type: ignore
+        loader=sciq_with_support_loader("sciq", n_test=SCIQ_N_TEST),  # type: ignore
         formatter=format_sciq_with_support,  # type: ignore
     ),
 )
 
 
-def format_anthropic_hh(ex, rng):
-    hard_label = int(rng.random() < 0.5)
-    txt = ex["chosen"] if hard_label else ex["rejected"]
-    return dict(txt=txt, hard_label=hard_label)
+def format_anthropic_hh(ex, rng) -> dict:
+    ch, rej = ex["chosen"], ex["rejected"]
+    ch_last_assistant = ch.rfind("Assistant:")
+    ch_prompt, ch_response = ch[:ch_last_assistant].rstrip(), ch[ch_last_assistant:]
+    rej_last_assistant = rej.rfind("Assistant:")
+    rej_prompt, rej_response = (
+        rej[:rej_last_assistant].rstrip(),
+        rej[rej_last_assistant:],
+    )
+    if ch_prompt != rej_prompt:
+        return dict(txt="", hard_label=False)  # empty texts are filtered out
+    resps = [ch_response, rej_response]
+    rng.shuffle(resps)
+    txt = f"{ch_prompt}\n\n<|Completion 1|>{resps[0]}\n\n<|Completion 2|>{resps[1]}"
+    return dict(
+        txt=txt, hard_label=resps[1] == ch_response
+    )  # True if the second is better
 
 
 register_dataset(
@@ -622,6 +627,22 @@ register_dataset(
     DatasetConfig(
         loader=hf_loader("Anthropic/hh-rlhf"),  # type: ignore
         formatter=format_anthropic_hh,  # type: ignore
+    ),
+)
+
+
+def format_anthropic_hh_for_lm_head(ex, rng):
+    out = format_anthropic_hh(ex, rng)
+    out["txt"] = f"{out['txt']}\n\nWhich completion is better?"
+    out["choices"] = (" 1", " 2")
+    return out
+
+
+register_dataset(
+    "anthropic_hh_for_lm_head",
+    DatasetConfig(
+        loader=hf_loader("Anthropic/hh-rlhf"),  # type: ignore
+        formatter=format_anthropic_hh_for_lm_head,  # type: ignore
     ),
 )
 
@@ -664,6 +685,47 @@ register_dataset(
         formatter=format_boolq,  # type: ignore
     ),
 )
+
+
+# Quirky datasets
+
+quirky_templates = {
+    "capitals": "{admin_name}, {country}\n\n{city}",
+    "hemisphere": "{city}",
+    "population": "{city}",
+    "sciq": "{support}\n\n{question} {answer}",
+    "sentiment": "{title}\n{review}",
+    "nli": "{premise}\n\n{hypothesis}",
+    "authors": "{title}\n{author}",
+    "addition": "{op1} | {op2} | {result}",
+    "subtraction": "{op1} | {op2} | {result}",
+    "multiplication": "{op1} | {op2} | {result}",
+    "modularaddition": "{op1} | {op2} | {result}",
+    "squaring": "{op1} | {result}",
+}
+
+
+def format_quirky(ex, rng, ds_name, label_col="alice_label"):
+    return dict(
+        txt=quirky_templates[ds_name].format(**ex["template_args"]),
+        hard_label=ex[label_col],
+    )
+
+
+for ds_name in quirky_templates:
+    for label_col in ["alice_label", "bob_label"]:
+        loader = quirky_sciq_loader if ds_name == "sciq" else hf_loader
+        register_dataset(
+            f"quirky_{ds_name}" + ("_weak" if label_col == "bob_label" else ""),
+            DatasetConfig(
+                # NOTE: this is using the same examples as the quirky models were finetuned on
+                loader=loader(f"EleutherAI/quirky_{ds_name}_raw"),  # type: ignore
+                formatter=functools.partial(
+                    format_quirky, ds_name=ds_name, label_col=label_col
+                ),  # type: ignore
+                balance=False,
+            ),
+        )
 
 
 VALID_DATASETS: list[str] = list(_REGISTRY.keys())

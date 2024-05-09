@@ -1,4 +1,4 @@
-from typing import Optional
+from typing import Optional, Union
 import datasets
 import numpy as np
 import torch
@@ -12,6 +12,20 @@ def unpack(x):
     return x.detach().float().cpu().numpy().tolist()
 
 
+def get_last_hidden_states(hidden_states, input_ids):
+    h = torch.stack(
+        list(map(lambda x: x.detach().cpu(), hidden_states))
+    )  # [lyr, bs, seq, d]
+    # grab the last token position at all layers
+    seq_lens = (input_ids != 0).sum(dim=-1).cpu()
+    h = torch.stack(
+        [h[:, i, seq_lens[i] - 1, :] for i in range(len(seq_lens))],
+        dim=1,
+    )
+    h = h.bfloat16().transpose(0, 1)  # [bs, lyr, d]
+    return h
+
+
 def eval_loop(
     model: nn.Module,
     ds: datasets.Dataset,
@@ -19,7 +33,11 @@ def eval_loop(
     verbose: bool = True,
     metric_prefix: Optional[str] = None,
     remove_large_columns: bool = False,
-) -> tuple[datasets.Dataset, dict[str, float]]:
+    return_hiddens: bool = False,
+) -> Union[
+    tuple[datasets.Dataset, dict[str, float]],
+    tuple[datasets.Dataset, dict[str, float], torch.Tensor],
+]:
     """
     This function evaluates the accuracy of a given model on a given dataset.
 
@@ -35,10 +53,10 @@ def eval_loop(
     """
 
     model.eval()
-
     with torch.no_grad():
         results = []
-        # for ex in ds:
+        hiddens = []
+
         for batch in to_batch(ds, eval_batch_size):
             # pad input_ids to common length
             input_ids = torch.nn.utils.rnn.pad_sequence(
@@ -47,9 +65,13 @@ def eval_loop(
             soft_labels = batch["soft_label"]
 
             # run forward pass
-            raw_logits = model(
-                input_ids, choice_input_ids=batch.get("choice_input_ids")
+            raw_logits, hidden_states = model(
+                input_ids,
+                output_hidden_states=True,
             )
+
+            if return_hiddens:
+                hiddens.append(get_last_hidden_states(hidden_states, input_ids))
 
             raw_logprobs = torch.nn.functional.log_softmax(raw_logits, dim=-1)
             hard_labels = np.argmax(soft_labels, axis=-1)
@@ -100,7 +122,10 @@ def eval_loop(
             for k, v in metrics.items():
                 print(f"\t{k}: {v:.3f}")
 
-        return datasets.Dataset.from_list(results), metrics
+    if return_hiddens:
+        hiddens = torch.cat(hiddens, dim=0)
+        return datasets.Dataset.from_list(results), metrics, hiddens
+    return datasets.Dataset.from_list(results), metrics
 
 
 def compute_metrics(
@@ -155,7 +180,7 @@ def compute_metrics(
 
 
 # ##############################################################################
-# # Metrics
+# # Metrics                                                                    #
 # ##############################################################################
 
 

@@ -1,9 +1,8 @@
+import os
 import torch
 from typing import Optional
 
 import yaml
-
-from weak_to_strong.loss import logconf_loss_fn, product_loss_fn, xent_loss, kl_loss
 
 
 def load_config(config_path="configs/default.yaml"):
@@ -38,7 +37,7 @@ class ModelConfig:
         eval_batch_size (int, optional):
             The batch size for evaluation. Defaults to 32.
         minibatch_size_per_replica (int, optional):
-            The minibatch size per device. Defaults to None.
+            The minibatch size per device. Defaults to eval_batch_size.
         lora_modules (list[str], optional):
             The list of LORA modules. Defaults to None.
             If None, then LORA is not used.
@@ -82,7 +81,7 @@ class ModelConfig:
         name: str,
         # memory, in bytes, of the model
         memory: float,
-        default_lr: float = 4e-5,
+        default_lr: float = 1e-6,
         eval_batch_size: int = 32,
         minibatch_size_per_replica: Optional[int] = None,
         lora_modules: Optional[list[str]] = None,
@@ -107,16 +106,16 @@ class ModelConfig:
             custom_kwargs["torch_dtype"] = torch.bfloat16
         if (
             not torch.cuda.is_bf16_supported() or lora_modules is None
-        ) and custom_kwargs[  # we enforce fp32 for full finetuning
-            "torch_dtype"
-        ] == torch.bfloat16:
+        ) and custom_kwargs["torch_dtype"] == torch.bfloat16:
             custom_kwargs["torch_dtype"] = torch.float32
         self.name = name
         memory_util_est = memory
         if custom_kwargs["torch_dtype"] == torch.float32:
             memory_util_est *= 2
+        if lora_modules is None:
+            memory_util_est *= 4
         # NOTE: this memory estimate doesn't account for the
-        # optimizer, LoRA, checkpointing, seq len, batch size, etc.
+        # optimizer, LoRA rank, checkpointing, seq len, batch size, etc.
 
         if model_parallel is None:
             model_parallel = (
@@ -129,47 +128,19 @@ class ModelConfig:
         if minibatch_size_per_replica is None:
             minibatch_size_per_replica = eval_batch_size
         self.memory = memory
-        self.default_lr = default_lr
-        self.eval_batch_size = eval_batch_size
-        self.minibatch_size_per_replica = minibatch_size_per_replica
+        self.default_lr = float(default_lr)
+        self.eval_batch_size = int(eval_batch_size)
+        self.minibatch_size_per_replica = int(minibatch_size_per_replica)
         self.lora_modules = lora_modules
         self.custom_kwargs = custom_kwargs
-        self.gradient_checkpointing = gradient_checkpointing
-        self.model_parallel = model_parallel
+        self.gradient_checkpointing = bool(gradient_checkpointing)
+        self.model_parallel = bool(model_parallel)
         self.default_optimizer = default_optimizer
 
 
 MODELS_DICT: dict[str, dict] = {
-    cfg["name"]: cfg for cfg in load_config("configs/models.yaml")["models"]
+    cfg["name"]: cfg
+    for cfg in load_config(
+        os.path.join(os.path.dirname(os.path.dirname(__file__)), "configs/models.yaml")
+    )["models"]
 }
-
-
-loss_dict = {
-    "logconf": logconf_loss_fn(),
-    "product": product_loss_fn(),
-    "xent": xent_loss(),
-    "kl": kl_loss(),
-}
-
-VALID_LOSSES: list[str] = list(loss_dict.keys())
-
-
-def get_config_foldername(config: dict) -> str:
-    def shorten_key(key: str) -> str:
-        return "".join(word[0] for word in key.split("_"))
-
-    def shorten_value(value) -> str:
-        if isinstance(value, bool):
-            return "1" if value else "0"
-        elif isinstance(value, str):
-            value = value.split("/")[-1]
-            if "_" in value:
-                return "_".join(word[:4] for word in value.split("_"))
-            else:
-                return value
-        else:
-            return str(value)
-
-    return "-".join(
-        f"{shorten_key(k)}={shorten_value(v)}" for k, v in sorted(config.items())
-    )
