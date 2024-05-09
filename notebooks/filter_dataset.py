@@ -12,16 +12,31 @@ def main(ds_name, weak_labels_path=None):
 
     BS = 4
 
-    print("getting strong model activations...")
-    activations_by_layer = make_acts(model0, train_ds, eval_batch_size=BS)
 
-    torch.save(activations_by_layer, f"acts_{ds_name}.pt")
-    print(f"saved activations to acts_{ds_name}.pt")
+    last_acts_path = f"last_acts_{ds_name}.pt"
+    if os.path.exists(last_acts_path):
+        print(f"loading last-position activations from {last_acts_path}...")
+        all_last_acts = torch.load(last_acts_path)
+        print("loaded.")
+    else:
+        acts_path = f"acts_{ds_name}.pt"
+        if os.path.exists(acts_path):
+            print(f"loading activations from {acts_path}...")
+            activations_by_layer = torch.load(acts_path)
+            print("loaded.")
+        else:
+            print("getting strong model activations...")
+            activations_by_layer = make_acts(model0, train_ds, eval_batch_size=BS)
 
-    all_last_acts = cat_last_acts(train_ds, activations_by_layer, eval_batch_size=BS)
+            torch.save(activations_by_layer, f"acts_{ds_name}.pt")
+            print(f"saved activations to acts_{ds_name}.pt")
 
-    torch.save(all_last_acts, f"last_acts_{ds_name}.pt")
-    print(f"saved last-position activations to last_acts_{ds_name}.pt")
+        print("getting last-position activations...")
+        all_last_acts = cat_last_acts(train_ds, activations_by_layer, eval_batch_size=BS)
+
+        torch.save(all_last_acts, f"last_acts_{ds_name}.pt")
+        print(f"saved last-position activations to last_acts_{ds_name}.pt")
+        
 
     print("running kNN")
     mid_layer = len(all_last_acts) // 2 - 1
@@ -39,7 +54,8 @@ def main(ds_name, weak_labels_path=None):
 
     # filter dataset
     train_ds_untok = load_from_disk(weak_labels_path)
-    good_ds = train_ds_untok.select(np.where(good_points))
+    #breakpoint()
+    good_ds = train_ds_untok.select(good_points.nonzero())
 
     # save dataset
     good_ds.save_to_disk(weak_labels_path + "_filtered")
