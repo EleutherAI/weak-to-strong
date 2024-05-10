@@ -30,8 +30,8 @@ datasets = [
 
 
 def get_model_sizes(dataset):
-    wms = ["Qwen/Qwen1.5-4B"]
-    sms = ["meta-llama/Meta-Llama-3-8B"]
+    wms = ["Qwen/Qwen1.5-0.5B"]
+    sms = ["mistralai/Mistral-7B-v0.1"]
     return wms, sms
 
 
